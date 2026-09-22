@@ -1,0 +1,1775 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SASE 상품별 통합 현황판</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" crossorigin="anonymous">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            saseRed: '#C8102E',
+            saseDarkRed: '#8B0000',
+            saseOrange: '#F58220',
+            saseGray: '#2B2D42',
+            saseLightGray: '#F8F9FA'
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: #F1F4F9;
+      padding-bottom: 44px;
+    }
+    .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+    .custom-scroll::-webkit-scrollbar-track { background: #EDF2F7; }
+    .custom-scroll::-webkit-scrollbar-thumb { background: #CBD5E0; border-radius: 3px; }
+    .stage-item { transition: background-color .15s, box-shadow .15s; }
+    body.capturing #appHeader, body.capturing #siteFooter, body.capturing #detailPanel { position: static !important; }
+    body.capturing #stageScroller { overflow: visible !important; }
+    body.capturing #siteFooter { backdrop-filter: none; }
+    @media print {
+      @page { size: A3 landscape; margin: 8mm; }
+      body { background: #fff; padding-bottom: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .no-print, .modal { display: none !important; }
+      #appHeader { position: static !important; box-shadow: none !important; }
+      #siteFooter { position: static !important; border-top: 1px solid #E2E8F0; }
+      #stageScroller { overflow: visible !important; }
+      #stageColumns { min-width: 0 !important; }
+      #mainGrid { grid-template-columns: minmax(0, 1fr) 340px !important; }
+      #detailPanel { position: static !important; }
+      section, .stage-col { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body class="text-slate-800 antialiased min-h-screen flex flex-col">
+<div id="captureRoot" class="flex-1 flex flex-col bg-[#F1F4F9]">
+
+  <!-- 상단 헤더 -->
+  <header id="appHeader" class="bg-white border-b border-slate-200 lg:sticky lg:top-0 z-40 shadow-sm">
+    <div class="max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center space-x-4">
+        <div class="flex items-center space-x-2">
+          <span class="bg-saseRed text-white font-black px-2.5 py-1 rounded text-lg tracking-wider">SASE</span>
+          <span class="text-xs font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded border border-slate-200">물류기획</span>
+        </div>
+        <div class="h-6 w-px bg-slate-200"></div>
+        <h1 class="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
+          상품별 통합 현황판
+          <span class="text-xs font-normal text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> 1단계: 엑셀 업로드 검증판
+          </span>
+        </h1>
+      </div>
+
+      <div class="flex items-center gap-3 text-xs">
+        <div id="pastViewBadge" class="hidden items-center gap-1.5 bg-amber-50 border border-amber-300 text-amber-800 font-bold px-2.5 py-1.5 rounded-lg">
+          <i class="fa-solid fa-clock-rotate-left"></i> 과거 데이터 조회 중 (읽기 전용)
+          <button onclick="selectLatestSnapshot()" class="no-print ml-1 underline text-amber-900" data-capture-ignore>최신으로</button>
+        </div>
+        <div class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-right">
+          <div class="text-[10px] text-slate-400 leading-tight">현재 일시</div>
+          <div id="nowClock" class="font-bold text-slate-800 tabular-nums leading-tight">-</div>
+        </div>
+        <div class="bg-red-50 border border-saseRed/30 rounded-lg px-3 py-1.5 text-right">
+          <div class="text-[10px] text-saseRed/80 leading-tight">보고 있는 데이터</div>
+          <div id="dataBasisMain" class="font-extrabold text-saseDarkRed leading-tight">업로드 데이터 없음</div>
+          <div id="dataBasisSub" class="text-[10px] text-slate-500 leading-tight"></div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="flex-1 max-w-[1800px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 space-y-4">
+
+    <!-- 도구 모음: 검색 · 이력 · 단위 · 출력 · 관리 -->
+    <section class="bg-white rounded-xl shadow-sm border border-slate-200 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="relative">
+          <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+          <input type="text" id="searchInput" oninput="renderAll()" placeholder="품번 또는 품명 검색..." class="pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-saseRed w-48">
+        </div>
+        <select id="originFilter" onchange="renderAll()" class="py-1.5 px-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-saseRed text-slate-600">
+          <option value="ALL">전체 원산지</option>
+        </select>
+        <label class="flex items-center gap-1.5 text-slate-500">
+          소진속도 기준
+          <select id="velocityWindow" onchange="onVelocityWindowChange()" class="py-1.5 px-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-saseRed text-slate-700">
+            <option value="10">최근 10영업일</option>
+            <option value="20" selected>최근 20영업일</option>
+            <option value="60">최근 60영업일</option>
+          </select>
+        </label>
+        <div class="h-5 w-px bg-slate-200 mx-1"></div>
+        <label class="flex items-center gap-1.5 text-slate-500">
+          <i class="fa-solid fa-clock-rotate-left text-saseRed"></i> 데이터 이력
+          <select id="snapshotSelect" onchange="onSnapshotSelect()" class="py-1.5 px-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-saseRed text-slate-700 max-w-[300px]">
+            <option value="">업로드 이력 없음</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2" data-capture-ignore>
+        <div class="bg-slate-100 p-1 rounded-lg border border-slate-200 flex items-center font-semibold">
+          <button id="unitTonBtn" onclick="setGlobalUnit('TON')" class="px-3 py-1 rounded-md transition-all bg-white text-saseRed shadow-sm">톤 (Ton)</button>
+          <button id="unitBoxBtn" onclick="setGlobalUnit('BOX')" class="px-3 py-1 rounded-md transition-all text-slate-500 hover:text-slate-900">박스 (Box)</button>
+        </div>
+        <button onclick="openWarehouseModal(null)" class="no-print inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-semibold rounded-lg">
+          <i class="fa-solid fa-warehouse text-saseRed"></i> 창고별 재고
+        </button>
+        <div class="no-print flex items-center border border-slate-300 rounded-lg overflow-hidden">
+          <button onclick="printView()" class="px-2.5 py-1.5 hover:bg-slate-50 text-slate-700 font-semibold" title="인쇄"><i class="fa-solid fa-print"></i> 인쇄</button>
+          <button onclick="exportImage()" class="px-2.5 py-1.5 hover:bg-slate-50 text-slate-700 font-semibold border-l border-slate-300" title="이미지(PNG) 저장"><i class="fa-regular fa-image"></i> 이미지</button>
+          <button onclick="exportPdf()" class="px-2.5 py-1.5 hover:bg-slate-50 text-slate-700 font-semibold border-l border-slate-300" title="PDF 저장"><i class="fa-regular fa-file-pdf"></i> PDF</button>
+        </div>
+        <button onclick="openUploadModal()" class="no-print inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white font-medium rounded-lg shadow-sm">
+          <i class="fa-solid fa-file-arrow-up text-emerald-400"></i> 데이터 업로드 <i class="fa-solid fa-lock text-[10px] text-slate-400"></i>
+        </button>
+        <button onclick="openDeleteModal()" class="no-print inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-red-50 border border-red-200 text-red-700 font-medium rounded-lg">
+          <i class="fa-solid fa-trash-can"></i> 데이터 삭제 <i class="fa-solid fa-lock text-[10px] text-red-300"></i>
+        </button>
+      </div>
+    </section>
+
+    <div id="emptyState" class="hidden bg-white rounded-xl border border-dashed border-slate-300 p-10 text-center text-sm text-slate-500">
+      <i class="fa-solid fa-database text-3xl text-slate-300 mb-3"></i>
+      <p class="font-bold text-slate-700">표시할 데이터가 없습니다.</p>
+      <p id="emptyStateDetail" class="mt-1 text-xs">관리자가 [데이터 업로드]로 엑셀을 올리면 이 화면에 표시됩니다.</p>
+    </div>
+
+    <!-- 본문: 7단계 구역 + 상품 상세 패널 -->
+    <div id="mainGrid" class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px] gap-4 items-start">
+
+      <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 min-w-0">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+          <h2 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+            <i class="fa-solid fa-route text-saseRed"></i> 해외 수입 7단계 상품별 현황
+            <span class="text-xs font-normal text-slate-500" id="productCountBadge"></span>
+          </h2>
+          <div class="flex items-center gap-4 text-[11px] text-slate-500">
+            <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-saseRed"></span> ①~⑥ 수량 (<span class="currentUnitLabel">톤</span>)</span>
+            <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-saseOrange"></span> ⑦ 예상 소진 영업일</span>
+            <span>≈ 환산값</span>
+          </div>
+        </div>
+        <div id="stageScroller" class="overflow-x-auto custom-scroll pb-1">
+          <div id="stageColumns" class="grid grid-cols-7 gap-2 min-w-[1190px]"></div>
+        </div>
+        <p class="text-[11px] text-slate-400 mt-3 flex items-center gap-1.5">
+          <i class="fa-solid fa-circle-info"></i>
+          <span id="stageFootnote">상품을 클릭하면 오른쪽에서 해당 상품의 7단계 수량이 표시됩니다.</span>
+        </p>
+      </section>
+
+      <!-- 상품 상세 패널 -->
+      <section id="detailPanel" class="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col p-5 xl:sticky xl:top-24">
+        <div id="detailEmpty" class="text-xs text-slate-400 text-center py-10">
+          <i class="fa-solid fa-hand-pointer text-2xl text-slate-300 mb-2"></i>
+          <p>왼쪽 구역에서 상품을 클릭하세요.</p>
+        </div>
+        <div id="detailBody" class="hidden">
+          <div class="flex items-start justify-between border-b border-slate-200 pb-3 mb-4 gap-2">
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-1.5">
+                <span id="detailBadgeCode" class="text-xs font-black bg-saseRed text-white px-2 py-0.5 rounded"></span>
+                <span id="detailBadgeOrigin" class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded border border-slate-200"></span>
+                <span id="detailRiskBadge" class="text-xs font-bold px-2 py-0.5 rounded"></span>
+              </div>
+              <h3 id="detailProductName" class="text-base font-extrabold text-slate-900 mt-1 break-keep"></h3>
+              <p id="detailSpec" class="text-xs text-slate-400"></p>
+              <div id="detailFlags" class="flex flex-wrap gap-1 mt-1.5"></div>
+            </div>
+            <button onclick="openWarehouseModalForSelected()" class="no-print shrink-0 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-2.5 py-1.5 rounded-lg border border-slate-300 flex items-center gap-1.5" data-capture-ignore>
+              <i class="fa-solid fa-warehouse text-saseRed"></i> 창고 현황
+            </button>
+          </div>
+
+          <div class="space-y-3.5 mb-4">
+            <h4 class="text-xs font-bold text-slate-700 flex items-center justify-between">
+              <span>7단계 수량</span>
+              <span class="text-[11px] text-slate-400" id="detailPipelineTotal"></span>
+            </h4>
+            <div class="space-y-2.5" id="detailPipelineBars"></div>
+          </div>
+
+          <div id="detailForecast" class="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5 mb-4 text-xs"></div>
+
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                <i class="fa-solid fa-building text-saseRed"></i> <span id="miniWarehouseTitle">주요 보관 창고</span>
+              </span>
+              <button onclick="openWarehouseModalForSelected()" class="no-print text-[11px] text-saseRed hover:underline font-bold" data-capture-ignore>창고 전체보기 ▸</button>
+            </div>
+            <div class="space-y-2 text-xs" id="miniWarehouseList"></div>
+          </div>
+          <p id="detailNote" class="text-[10px] text-slate-400 mt-3"></p>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer id="siteFooter" class="fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur border-t border-slate-200 text-xs text-slate-600">
+    <div class="max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 h-10 flex items-center justify-between gap-3">
+      <span class="font-semibold">기획: 안솔 책임 (물류부문 B2C물류팀)</span>
+      <span class="text-[11px] text-slate-400 hidden sm:inline">SASE 상품별 통합 현황판 · 계산 기준: 기획서_260921</span>
+    </div>
+  </footer>
+</div>
+
+<!-- 모달: 창고별 재고 -->
+<div id="warehouseModal" class="modal fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+  <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-5xl w-full max-h-[90vh] flex flex-col overflow-hidden">
+    <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+      <div>
+        <div class="flex items-center gap-2">
+          <span class="bg-saseRed text-white text-xs font-bold px-2 py-0.5 rounded">⑤ 보관 상세</span>
+          <h3 class="text-base font-extrabold text-slate-900">
+            창고별 재고 <span id="modalTargetProductName" class="text-saseRed font-bold"></span>
+          </h3>
+        </div>
+        <p class="text-xs text-slate-500 mt-0.5" id="modalWarehouseSub">LOT재고현황 기말재고 기준 (BOX 단위 행만 집계)</p>
+      </div>
+      <button onclick="closeModal('warehouseModal')" class="w-8 h-8 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-600 flex items-center justify-center">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+    <div class="p-6 overflow-y-auto custom-scroll space-y-6 flex-1">
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+        <div class="bg-slate-50 border border-slate-200 rounded-xl p-3">
+          <span class="text-slate-400 block mb-1">재고 보유 창고</span>
+          <span class="text-base font-bold text-slate-900" id="modalWhCount">-</span>
+        </div>
+        <div class="bg-red-50 border border-red-200 rounded-xl p-3">
+          <span class="text-red-700 block mb-1">보관 합계 (집계 대상)</span>
+          <span class="text-base font-bold text-saseDarkRed" id="modalStockTotal">-</span>
+        </div>
+        <div class="bg-slate-50 border border-slate-200 rounded-xl p-3">
+          <span class="text-slate-500 block mb-1">집계 제외 창고 재고</span>
+          <span class="text-base font-bold text-slate-600" id="modalExcludedTotal">-</span>
+        </div>
+        <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-3">
+          <span class="text-indigo-700 block mb-1">③ 통관·검역 (보세구역)</span>
+          <span class="text-base font-bold text-indigo-800" id="modalCustomsTotal">-</span>
+        </div>
+      </div>
+      <div class="bg-white border border-slate-200 rounded-xl p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h4 class="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+            <i class="fa-solid fa-chart-column text-saseRed"></i> 창고별 보관 수량 (상위 15개)
+          </h4>
+          <div class="text-[11px] text-slate-400">단위: <span class="currentUnitLabel">톤</span></div>
+        </div>
+        <div class="h-64"><canvas id="warehouseChart"></canvas></div>
+      </div>
+      <div class="border border-slate-200 rounded-xl overflow-hidden">
+        <div class="bg-slate-50 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
+          <span class="text-xs font-bold text-slate-700">창고별 상세</span>
+          <span class="text-[11px] text-slate-400">회색 행 = 집계 제외 창고 (불량·버츄얼·불용·샘플)</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs text-left">
+            <thead class="bg-slate-100/60 text-slate-500 font-semibold border-b border-slate-200">
+              <tr>
+                <th class="py-2 px-3">창고명</th>
+                <th class="py-2 px-3">구분 태그</th>
+                <th class="py-2 px-3 text-right font-bold text-slate-800">보관 수량</th>
+                <th class="py-2 px-3 text-center">점유율</th>
+                <th class="py-2 px-3 text-center">비고</th>
+              </tr>
+            </thead>
+            <tbody id="modalWarehouseTableBody" class="divide-y divide-slate-100"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="px-6 py-3 bg-slate-50 border-t border-slate-200 flex justify-between items-center text-xs">
+      <span class="text-slate-500"><i class="fa-solid fa-info-circle text-saseRed"></i> 가용/묶인 재고 구분은 주문 정보가 없어 1단계에서는 표시하지 않습니다 (기획서 Q6).</span>
+      <button onclick="closeModal('warehouseModal')" class="px-4 py-1.5 bg-slate-800 text-white rounded-lg hover:bg-slate-900">닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 모달: 관리자 비밀번호 -->
+<div id="passwordModal" class="modal fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] hidden items-center justify-center p-4">
+  <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-sm w-full overflow-hidden">
+    <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+      <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2"><i class="fa-solid fa-lock text-saseRed"></i> 관리자 확인</h3>
+      <button onclick="resolvePassword(false)" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <form class="p-6 space-y-3 text-xs" onsubmit="event.preventDefault(); resolvePassword(true);">
+      <p class="text-slate-600">업로드와 삭제는 관리자만 할 수 있습니다. 비밀번호를 입력하세요.</p>
+      <input id="adminPasswordInput" type="password" autocomplete="off" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:border-saseRed" placeholder="관리자 비밀번호">
+      <p id="passwordError" class="hidden text-red-600 font-semibold">비밀번호가 맞지 않습니다.</p>
+      <div class="flex justify-end gap-2 pt-1">
+        <button type="button" onclick="resolvePassword(false)" class="px-3 py-1.5 border border-slate-300 text-slate-600 rounded-lg hover:bg-slate-100">취소</button>
+        <button type="submit" class="px-4 py-1.5 bg-saseRed hover:bg-saseDarkRed text-white font-bold rounded-lg">확인</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- 모달: 데이터 업로드 -->
+<div id="uploadModal" class="modal fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+  <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden">
+    <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+      <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+        <i class="fa-solid fa-file-excel text-emerald-600 text-base"></i> 실무 엑셀 업로드 (관리자)
+      </h3>
+      <button onclick="closeUploadModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="p-6 space-y-4 text-xs overflow-y-auto custom-scroll">
+      <div class="border-2 border-dashed border-slate-300 rounded-xl p-6 text-center bg-slate-50 hover:bg-slate-100/70 cursor-pointer" id="dropZone" onclick="document.getElementById('fileInput').click()">
+        <i class="fa-solid fa-cloud-arrow-up text-3xl text-saseRed mb-2"></i>
+        <p class="font-bold text-slate-700">엑셀 파일을 끌어다 놓거나 클릭해서 선택 (여러 개 가능)</p>
+        <p class="text-slate-400 text-[11px] mt-1">파일 종류는 내용으로 자동 인식합니다. 올리지 않은 종류는 직전 업로드분을 그대로 이어받습니다.</p>
+        <input type="file" id="fileInput" class="hidden" multiple accept=".xlsx,.xls" onchange="handleFiles(Array.from(this.files)); this.value='';">
+      </div>
+
+      <div class="border border-slate-200 rounded-xl overflow-hidden">
+        <table class="w-full text-left">
+          <thead class="bg-slate-50 text-slate-500 border-b border-slate-200">
+            <tr><th class="py-2 px-3">자료</th><th class="py-2 px-3">필수 조회 조건</th><th class="py-2 px-3">이번 업로드</th></tr>
+          </thead>
+          <tbody id="uploadSlotBody" class="divide-y divide-slate-100"></tbody>
+        </table>
+      </div>
+
+      <div class="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2">
+        <p class="font-bold text-slate-800 flex items-center gap-1.5"><i class="fa-brands fa-github"></i> 깃허브 저장 설정</p>
+        <div class="grid grid-cols-3 gap-2">
+          <label class="block">소유자(owner)<input id="ghOwner" class="mt-0.5 w-full px-2 py-1.5 border border-slate-300 rounded-md bg-white" autocomplete="off"></label>
+          <label class="block">저장소(repo)<input id="ghRepo" class="mt-0.5 w-full px-2 py-1.5 border border-slate-300 rounded-md bg-white" autocomplete="off"></label>
+          <label class="block">브랜치<input id="ghBranch" class="mt-0.5 w-full px-2 py-1.5 border border-slate-300 rounded-md bg-white" autocomplete="off" value="main"></label>
+        </div>
+        <div class="grid grid-cols-3 gap-2">
+          <label class="block col-span-2">접근 토큰 (Personal Access Token) — 저장되지 않으며 매번 입력
+            <input id="ghToken" type="password" autocomplete="off" class="mt-0.5 w-full px-2 py-1.5 border border-slate-300 rounded-md bg-white" placeholder="github_pat_...">
+          </label>
+          <label class="block">업로드한 사람<input id="uploaderName" class="mt-0.5 w-full px-2 py-1.5 border border-slate-300 rounded-md bg-white" autocomplete="off" placeholder="예: 안솔"></label>
+        </div>
+        <p class="text-[11px] text-slate-400">토큰은 이 저장소만 선택한 Fine-grained 토큰에 <b>Contents: Read and write</b> 권한이면 충분합니다.</p>
+      </div>
+
+      <div id="uploadResult" class="hidden space-y-2"></div>
+    </div>
+    <div class="px-6 py-3 bg-slate-50 border-t border-slate-200 flex justify-between items-center gap-2 text-xs">
+      <span id="uploadStatus" class="text-slate-500"></span>
+      <div class="flex gap-2">
+        <button onclick="closeUploadModal()" class="px-3 py-1.5 border border-slate-300 text-slate-600 rounded-lg hover:bg-slate-100">닫기</button>
+        <button id="analyzeBtn" onclick="analyzeUpload()" class="px-4 py-1.5 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-lg">1. 검증·미리보기</button>
+        <button id="commitBtn" onclick="commitUpload()" disabled class="px-4 py-1.5 bg-saseRed hover:bg-saseDarkRed text-white font-bold rounded-lg disabled:opacity-40 disabled:cursor-not-allowed">2. 깃허브에 저장</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 모달: 데이터 삭제 -->
+<div id="deleteModal" class="modal fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+  <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden">
+    <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+      <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2"><i class="fa-solid fa-trash-can text-red-600"></i> 업로드 데이터 삭제 (관리자)</h3>
+      <button onclick="closeDeleteModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="p-6 space-y-4 text-xs overflow-y-auto custom-scroll">
+      <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-amber-800 space-y-1">
+        <p class="font-bold"><i class="fa-solid fa-triangle-exclamation"></i> 삭제 전 확인</p>
+        <p>삭제하면 현황판 목록과 저장소의 현재 파일에서 사라집니다. 다만 깃허브 커밋 이력에는 예전 내용이 남습니다.</p>
+        <p>이후 업로드는 남아 있는 가장 최신 업로드분을 기준으로 이어받습니다.</p>
+      </div>
+      <div class="border border-slate-200 rounded-xl overflow-hidden">
+        <table class="w-full text-left">
+          <thead class="bg-slate-50 text-slate-500 border-b border-slate-200">
+            <tr><th class="py-2 px-3 w-8"></th><th class="py-2 px-3">업로드 일시</th><th class="py-2 px-3">주간 기준일</th><th class="py-2 px-3">이번에 올린 자료</th><th class="py-2 px-3">업로드한 사람</th></tr>
+          </thead>
+          <tbody id="deleteListBody" class="divide-y divide-slate-100"></tbody>
+        </table>
+      </div>
+      <label class="block">접근 토큰 (Personal Access Token) — 저장되지 않으며 매번 입력
+        <input id="ghTokenDelete" type="password" autocomplete="off" class="mt-0.5 w-full px-2 py-1.5 border border-slate-300 rounded-md bg-white" placeholder="github_pat_...">
+      </label>
+      <p class="text-[11px] text-slate-400">저장소 설정(owner/repo/branch)은 업로드 창의 값을 사용합니다: <span id="deleteRepoLabel" class="font-semibold text-slate-600"></span></p>
+    </div>
+    <div class="px-6 py-3 bg-slate-50 border-t border-slate-200 flex justify-between items-center gap-2 text-xs">
+      <span id="deleteStatus" class="text-slate-500"></span>
+      <div class="flex gap-2">
+        <button onclick="closeDeleteModal()" class="px-3 py-1.5 border border-slate-300 text-slate-600 rounded-lg hover:bg-slate-100">닫기</button>
+        <button id="deleteBtn" onclick="deleteSelectedSnapshots()" class="px-4 py-1.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg">선택 항목 삭제</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="no-print fixed bottom-14 right-6 z-[70] hidden max-w-sm bg-slate-900 text-white text-xs rounded-lg shadow-xl px-4 py-3"></div>
+
+<!-- ===================== 계산 로직 (기획서_260921 기준, 화면과 분리) ===================== -->
+<script id="core">
+const CONFIG = {
+  ADMIN_PASSWORD: '11111',                 // 화면단 실수 방지용 (보안 아님)
+  DATA_DIR: 'data',
+  // D4: 통관·검역 일할 차감 대상 = 수입 거래처 입고
+  IMPORT_VENDORS: ['사세유통수입', '사세부산수입', '(주)사세 수입본부'],
+  // D8: 집계 제외 창고
+  EXCLUDED_WH_PATTERNS: ['(불량)', '(버츄얼)'],
+  EXCLUDED_WH_EXACT: ['오뚜기백암센터/불용(3PL)', '샘플창고(전용)'],
+  // D5: 이 창고로의 이동은 판매출고로 간주
+  ONLINE_SALE_WH: '온라인실매출정산(버츄얼)',
+  // 1.4: 국내생산 제품군 (대상에서 제외)
+  DOMESTIC_GROUPS: ['국내외주가공품', '진천 가공품', '진천염지양념육', '진천 원료육', '국내매입원료'],
+  // 3.2.2: 미통관 R열 축약명 → ERP 정식명
+  WH_SHORT: { '고려부두': '고려부두창고(부산)', '남사': '남사창고(수도권)', '일죽': '일죽창고(수도권)', '평택': '평택창고(수도권)', '프라자': '프라자창고(수도권)', '행안주택': '행안주택창고(수도권)' },
+  LEAD_TIME_DAYS: 30,        // 4.7 최소 보관수량 = 리드타임 × 소진속도 (단위 미정: Q3, 영업일로 계산)
+  URGENT_DAYS: 7,            // Q2: D-7 이내 = 긴급, 보관 < 최소 보관수량 = 주의
+  SALES_HISTORY_DAYS: 180,   // 소진속도용 출고 이력 보관 기간(달력일)
+  DROP_ALERT_PCT: 50,
+  // 영업일 달력: 주말 + 아래 공휴일 제외 (매년 확인·보완 필요)
+  HOLIDAYS: [
+    '2026-01-01', '2026-02-16', '2026-02-17', '2026-02-18', '2026-03-02', '2026-05-01', '2026-05-05', '2026-05-25',
+    '2026-06-03', '2026-08-17', '2026-09-24', '2026-09-25', '2026-09-28', '2026-10-05', '2026-10-09', '2026-12-25',
+    '2027-01-01', '2027-02-08', '2027-02-09', '2027-03-01', '2027-05-05', '2027-05-13', '2027-08-16', '2027-09-14',
+    '2027-09-15', '2027-09-16', '2027-10-04', '2027-10-11', '2027-12-27'
+  ]
+};
+
+const Core = (() => {
+  const str = v => (v == null ? '' : String(v)).trim();
+  const normCode = v => str(v).replace(/\++$/, '').trim();
+  const pad = n => String(n).padStart(2, '0');
+  const round = (n, d = 3) => Math.round(n * 10 ** d) / 10 ** d;
+  const localISO = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const holidaySet = new Set(CONFIG.HOLIDAYS);
+
+  function toDate(v) {
+    if (v == null || v === '') return null;
+    if (typeof v === 'number') {
+      if (v < 1) return null;                // 시간값(00:00)만 있는 셀
+      return new Date(Math.round((Math.floor(v) - 25569) * 86400000)).toISOString().slice(0, 10);
+    }
+    if (v instanceof Date) return isNaN(v) ? null : localISO(v);
+    const m = str(v).match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
+    return m ? `${m[1]}-${pad(m[2])}-${pad(m[3])}` : null;
+  }
+  function toNum(v) {
+    if (v == null || v === '') return null;
+    if (typeof v === 'number') return isFinite(v) ? v : null;
+    const s = str(v).replace(/,/g, '');
+    if (!s || s === '(비어 있음)') return null;
+    const n = Number(s);
+    return isFinite(n) ? n : null;
+  }
+  function parseKg(spec) {
+    const m = str(spec).match(/^([\d.]+)\s*KG/i);
+    if (!m) return null;
+    const n = parseFloat(m[1]);
+    return n > 0 ? n : null;
+  }
+  const ORIGINS = ['인도네시아', '말레이시아', '아르헨티나', '뉴질랜드', '네덜란드', '방글라데시', '파키스탄', '필리핀', '에콰도르', '우루과이',
+    '덴마크', '스페인', '캐나다', '멕시코', '노르웨이', '러시아', '미얀마', '튀르키예', '헝가리', '이탈리아', '프랑스', '폴란드',
+    '태국', '브라질', '중국', '베트남', '미국', '칠레', '인도', '호주', '페루', '일본', '대만', '독일', '영국', '터키'];
+  function parseOrigin(name) {
+    let work = str(name);
+    const found = [];
+    for (const o of ORIGINS) {
+      const idx = work.indexOf(o);
+      if (idx >= 0) { found.push({ o, idx }); work = work.split(o).join('□'.repeat(o.length)); }
+    }
+    return found.length ? found.sort((a, b) => a.idx - b.idx).map(f => f.o).join('·') : null;
+  }
+  function isExcludedWh(name) {
+    const s = str(name);
+    return CONFIG.EXCLUDED_WH_EXACT.includes(s) || CONFIG.EXCLUDED_WH_PATTERNS.some(p => s.includes(p));
+  }
+  function whTag(name) {
+    const m = str(name).match(/\(([^()]*)\)\s*$/);
+    return m ? m[1] : '';
+  }
+  function isBizDay(iso) {
+    const d = new Date(iso + 'T00:00:00Z').getUTCDay();
+    return d !== 0 && d !== 6 && !holidaySet.has(iso);
+  }
+  function shiftISO(iso, days) {
+    const d = new Date(iso + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  }
+  function addBizDays(iso, n) {
+    let d = iso, left = n;
+    while (left > 0) { d = shiftISO(d, 1); if (isBizDay(d)) left--; }
+    return d;
+  }
+  function datesBetween(from, to) {
+    const out = [];
+    for (let d = from; d <= to; d = shiftISO(d, 1)) out.push(d);
+    return out;
+  }
+
+  /* ---------- 파일 종류 자동 인식 ---------- */
+  // book = { sheetNames: [...], rows(name) -> 2차원 배열(A1부터), cell(name, 'K3') -> 값 }
+  function detectType(book) {
+    if (book.sheetNames.includes('재고보고서') && book.sheetNames.includes('2.미통관재고')) return 'weekly';
+    const rows = book.rows(book.sheetNames[0]) || [];
+    for (const r of rows.slice(0, 5)) {
+      const h = (r || []).map(str);
+      if (h.includes('입고번호')) return 'receipt';
+      if (h.includes('출고번호')) return 'issue';
+      if (h.includes('이동번호')) return 'transfer';
+      if (h.includes('기말재고') && h.includes('LOT No.')) return 'lot';
+      if (h.includes('사용여부') && h.includes('품번')) return 'master';
+    }
+    return null;
+  }
+
+  function headerMap(rows, names) {
+    for (let i = 0; i < Math.min(rows.length, 5); i++) {
+      const h = (rows[i] || []).map(str);
+      if (Object.values(names).every(n => h.includes(n))) {
+        const idx = {};
+        for (const [k, n] of Object.entries(names)) idx[k] = h.indexOf(n);
+        return { headerRow: i, idx };
+      }
+    }
+    throw new Error(`필요한 열(${Object.values(names).join(', ')})을 찾지 못했습니다`);
+  }
+
+  /* ---------- (1) 주간재고보고서 ---------- */
+  function parseWeekly(book) {
+    const baseDate = toDate(book.cell('재고보고서', 'K3'));
+    if (!baseDate) throw new Error('재고보고서 K3 셀에서 보고서 기준일을 찾지 못했습니다');
+
+    const rep = book.rows('재고보고서');
+    const h = rep.findIndex((r, i) => i >= 10 && r && str(r[0]) === '제품군' && str(r[2]) === '품번');
+    if (h < 0) throw new Error('재고보고서의 품번 표 헤더(제품군/품번)를 찾지 못했습니다');
+    const products = {};
+    for (let i = h + 1; i < rep.length; i++) {
+      const r = rep[i] || [];
+      const group = str(r[0]);
+      if (!group || group.includes('요약') || CONFIG.DOMESTIC_GROUPS.includes(group)) continue;
+      const code = normCode(r[2]);
+      if (!code) continue;
+      const p = products[code] || (products[code] = { raw: str(r[2]), name: str(r[3]), spec: str(r[4]), group, channel: str(r[5]), g: 0, h: 0, j: 0 });
+      p.g += toNum(r[6]) || 0; p.h += toNum(r[7]) || 0; p.j += toNum(r[9]) || 0;
+    }
+
+    const un = book.rows('2.미통관재고');
+    const uh = un.findIndex(r => r && str(r[0]) === '품목코드');
+    if (uh < 0) throw new Error('2.미통관재고 시트의 헤더(품목코드)를 찾지 못했습니다');
+    const ship = {};
+    const stat = { s1: { n: 0, t: 0 }, s2: { n: 0, t: 0 }, s3: { n: 0, t: 0 }, ex: { n: 0, t: 0 } };
+    const blank = () => ({ t: 0, b: 0, tu: 0, n: 0 });
+    for (let i = uh + 1; i < un.length; i++) {
+      const r = un[i] || [];
+      const rawCode = str(r[0]);
+      if (!rawCode || rawCode === '0' || rawCode.includes('요약')) continue;
+      const code = normCode(rawCode);
+      const ton = toNum(r[2]) || 0;
+      const boxRaw = toNum(r[3]);
+      const box = boxRaw && boxRaw > 0 ? boxRaw : null;
+      const p = r[15];
+      let stage;
+      if (toDate(p)) stage = 's3';
+      else if (str(p).includes('수출')) stage = 'ex';
+      else {
+        const etd = toDate(r[13]);
+        stage = etd && etd <= baseDate ? 's2' : 's1';
+      }
+      const s = ship[code] || (ship[code] = { name: str(r[1]), s1: blank(), s2: blank(), s3: blank(), ex: blank() });
+      const o = s[stage];
+      o.t += ton; o.n++;
+      if (box != null) o.b += box; else o.tu += ton;
+      stat[stage].n++; stat[stage].t += ton;
+      if (stage === 's3') {
+        const wh = CONFIG.WH_SHORT[str(r[17])] || '미정';
+        s.s3wh = s.s3wh || {};
+        s.s3wh[wh] = round((s.s3wh[wh] || 0) + ton);
+      }
+    }
+    for (const s of Object.values(ship)) for (const k of ['s1', 's2', 's3', 'ex']) {
+      s[k].t = round(s[k].t); s[k].b = round(s[k].b); s[k].tu = round(s[k].tu);
+    }
+    for (const p of Object.values(products)) { p.g = round(p.g); p.h = round(p.h); p.j = round(p.j); }
+
+    return {
+      data: { baseDate, rep: products, ship },
+      meta: {
+        baseDate, rows: Object.keys(products).length,
+        stages: Object.fromEntries(Object.entries(stat).map(([k, v]) => [k, { n: v.n, t: round(v.t, 1) }]))
+      }
+    };
+  }
+
+  /* ---------- (2) 입고현황 ---------- */
+  function parseReceipt(book) {
+    const rows = book.rows(book.sheetNames[0]);
+    const { headerRow, idx } = headerMap(rows, { date: '입고일자', vendor: '거래처', code: '품번', unit: '재고단위', qty: '재고단위수량', wh: '입고창고', kind: '입고구분' });
+    const agg = {}; const kinds = new Set();
+    let from = null, to = null, n = 0, nonBox = 0, adj = 0, totalBox = 0, importBox = 0;
+    for (let i = headerRow + 1; i < rows.length; i++) {
+      const r = rows[i] || [];
+      const d = toDate(r[idx.date]);
+      if (!d) continue;                                   // 합계 행 등
+      n++;
+      if (!from || d < from) from = d; if (!to || d > to) to = d;
+      kinds.add(str(r[idx.kind]));
+      const vendor = str(r[idx.vendor]);
+      if (vendor.includes('재고조정')) { adj++; continue; }
+      if (str(r[idx.unit]).toUpperCase() !== 'BOX') { nonBox++; continue; }
+      const qty = toNum(r[idx.qty]) || 0;
+      totalBox += qty;
+      if (!CONFIG.IMPORT_VENDORS.includes(vendor)) continue;
+      importBox += qty;
+      const key = [d, normCode(r[idx.code]), str(r[idx.wh])].join('\u0001');
+      agg[key] = (agg[key] || 0) + qty;
+    }
+    const data = Object.entries(agg).map(([k, q]) => [...k.split('\u0001'), round(q)]);
+    return { data, meta: { from, to, rows: n, totalBox: round(totalBox), importBox: round(importBox), nonBox, adj, kinds: [...kinds] } };
+  }
+
+  /* ---------- (3) 출고현황 → 일자별 판매출고 ---------- */
+  function parseIssue(book) {
+    const rows = book.rows(book.sheetNames[0]);
+    const { headerRow, idx } = headerMap(rows, { date: '출고일자', customer: '고객', code: '품번', unit: '재고단위', qty: '재고단위수량', wh: '출고창고', kind: '출고구분' });
+    const daily = {}; const kinds = new Set();
+    let from = null, to = null, n = 0, nonBox = 0, adj = 0, excl = 0, totalBox = 0, saleBox = 0;
+    for (let i = headerRow + 1; i < rows.length; i++) {
+      const r = rows[i] || [];
+      const d = toDate(r[idx.date]);
+      if (!d) continue;
+      n++;
+      if (!from || d < from) from = d; if (!to || d > to) to = d;
+      kinds.add(str(r[idx.kind]));
+      if (str(r[idx.customer]).includes('재고조정')) { adj++; continue; }
+      if (str(r[idx.unit]).toUpperCase() !== 'BOX') { nonBox++; continue; }
+      const qty = toNum(r[idx.qty]) || 0;
+      totalBox += qty;
+      if (isExcludedWh(r[idx.wh])) { excl++; continue; }
+      const code = normCode(r[idx.code]);
+      const day = daily[d] || (daily[d] = {});
+      day[code] = round((day[code] || 0) + qty);
+      saleBox += qty;
+    }
+    return { data: daily, meta: { from, to, rows: n, totalBox: round(totalBox), saleBox: round(saleBox), nonBox, adj, excl, kinds: [...kinds] } };
+  }
+
+  /* ---------- (4) 창고재고이동현황 → 온라인 버츄얼 이동 = 판매 ---------- */
+  function parseTransfer(book) {
+    const rows = book.rows(book.sheetNames[0]);
+    const { headerRow, idx } = headerMap(rows, { date: '이동일자', fromWh: '출고창고', toWh: '입고창고', code: '품번', unit: '재고단위', qty: '이동수량' });
+    const daily = {};
+    let from = null, to = null, n = 0, nonBox = 0, totalBox = 0, saleBox = 0, saleRows = 0;
+    for (let i = headerRow + 1; i < rows.length; i++) {
+      const r = rows[i] || [];
+      const d = toDate(r[idx.date]);
+      if (!d) continue;
+      n++;
+      if (!from || d < from) from = d; if (!to || d > to) to = d;
+      if (str(r[idx.unit]).toUpperCase() !== 'BOX') { nonBox++; continue; }
+      const qty = toNum(r[idx.qty]) || 0;
+      totalBox += qty;
+      if (str(r[idx.toWh]) !== CONFIG.ONLINE_SALE_WH || isExcludedWh(r[idx.fromWh])) continue;
+      const code = normCode(r[idx.code]);
+      const day = daily[d] || (daily[d] = {});
+      day[code] = round((day[code] || 0) + qty);
+      saleBox += qty; saleRows++;
+    }
+    return { data: daily, meta: { from, to, rows: n, totalBox: round(totalBox), saleBox: round(saleBox), saleRows, nonBox } };
+  }
+
+  /* ---------- (5) 기간별재고현황(LOT) ---------- */
+  function parseLot(book) {
+    const rows = book.rows(book.sheetNames[0]);
+    const { headerRow, idx } = headerMap(rows, { wh: '창고', code: '품번', unit: '재고단위', end: '기말재고' });
+    const lot = {};
+    let n = 0, nonBox = 0, zeroEnd = 0, totalBox = 0;
+    for (let i = headerRow + 1; i < rows.length; i++) {
+      const r = rows[i] || [];
+      const wh = str(r[idx.wh]); const code = normCode(r[idx.code]);
+      if (!wh || !code) continue;                         // 합계 행
+      n++;
+      const end = toNum(r[idx.end]) || 0;
+      if (end === 0) zeroEnd++;
+      if (str(r[idx.unit]).toUpperCase() !== 'BOX') { nonBox++; continue; }
+      totalBox += end;
+      const p = lot[code] || (lot[code] = {});
+      p[wh] = round((p[wh] || 0) + end);
+    }
+    return { data: lot, meta: { rows: n, totalBox: round(totalBox), nonBox, zeroEnd } };
+  }
+
+  /* ---------- (6) 품번마스터 ---------- */
+  function parseMaster(book) {
+    const rows = book.rows(book.sheetNames[0]);
+    const { headerRow, idx } = headerMap(rows, { code: '품번', name: '품명', spec: '규격' });
+    const items = {};
+    let n = 0;
+    for (let i = headerRow + 1; i < rows.length; i++) {
+      const r = rows[i] || [];
+      const code = normCode(r[idx.code]);
+      if (!code) continue;
+      n++;
+      if (!items[code]) items[code] = [str(r[idx.code]), str(r[idx.name]), str(r[idx.spec])];
+    }
+    return { data: { items }, meta: { rows: n } };
+  }
+
+  const PARSERS = { weekly: parseWeekly, receipt: parseReceipt, issue: parseIssue, transfer: parseTransfer, lot: parseLot, master: parseMaster };
+
+  /* ---------- 일자별 이력 병합: 새 파일의 기간은 통째로 교체 (3.5) ---------- */
+  function mergeDaily(prevDaily, prevCover, parsed, T, keep) {
+    const daily = { ...(prevDaily || {}) };
+    let cover = new Set(prevCover || []);
+    if (parsed && parsed.meta.from) {
+      for (const d of datesBetween(parsed.meta.from, parsed.meta.to)) { delete daily[d]; cover.add(d); }
+      for (const [d, m] of Object.entries(parsed.data)) {
+        const f = {};
+        for (const [c, q] of Object.entries(m)) if (keep.has(c)) f[c] = q;
+        daily[d] = f;
+      }
+    }
+    const minDate = shiftISO(T, -CONFIG.SALES_HISTORY_DAYS);
+    for (const d of Object.keys(daily)) if (d < minDate) delete daily[d];
+    cover = [...cover].filter(d => d >= minDate).sort();
+    return { daily, cover };
+  }
+
+  /* ---------- 업로드 1회분 스냅샷 생성 ---------- */
+  // parsed: { weekly?, receipt?, issue?, transfer?, lot?, master? } (각각 {data, meta, file})
+  // masterStore: 저장소에 보관된 최신 품번마스터 { items, meta } 또는 null
+  function buildSnapshot({ prev, parsed, masterStore, now, uploader }) {
+    const T = localISO(now);
+    const weekly = parsed.weekly ? parsed.weekly.data : prev && prev.weekly;
+    if (!weekly) throw new Error('첫 업로드에는 주간재고보고서가 반드시 필요합니다');
+    const B = weekly.baseDate;
+
+    const masterItems = parsed.master ? parsed.master.data.items : masterStore ? masterStore.items : null;
+    const codes = new Set([...Object.keys(weekly.rep), ...Object.keys(weekly.ship)]);
+    const products = {};
+    for (const code of codes) {
+      const rep = weekly.rep[code];
+      const m = masterItems ? masterItems[code] : null;
+      const old = !masterItems && prev && prev.products ? prev.products[code] : null;
+      const name = (m && m[1]) || (old && old.name) || (rep && rep.name) || (weekly.ship[code] && weekly.ship[code].name) || '';
+      const spec = (m && m[2]) || (old && old.spec) || (rep && rep.spec) || '';
+      const kg = parseKg(m && m[2]) ?? (old ? old.kg : null) ?? parseKg(rep && rep.spec);
+      products[code] = {
+        raw: (m && m[0]) || (old && old.raw) || (rep && rep.raw) || code,
+        name, spec, kg,
+        origin: parseOrigin(name),
+        group: rep ? rep.group : '',
+        channel: rep ? rep.channel : '',
+        registered: masterItems ? !!m : (old ? old.registered : null),
+        inRange: !!rep
+      };
+    }
+
+    const nowISO = now.toISOString();
+    const sources = {};
+    for (const k of ['weekly', 'receipt', 'issue', 'transfer', 'lot', 'master']) {
+      if (parsed[k]) sources[k] = { file: parsed[k].file, uploadedAt: nowISO, ...parsed[k].meta };
+      else if (k === 'master' && masterStore) sources[k] = masterStore.meta ? { ...masterStore.meta } : null;
+      else if (prev && prev.sources && prev.sources[k]) sources[k] = { ...prev.sources[k] };
+      else sources[k] = null;
+      if (sources[k]) sources[k].fresh = !!parsed[k];
+    }
+
+    const issue = mergeDaily(prev && prev.salesIssue, prev && prev.coverIssue, parsed.issue, T, codes);
+    const move = mergeDaily(prev && prev.salesMove, prev && prev.coverMove, parsed.transfer, T, codes);
+
+    const snap = {
+      version: 1,
+      id: `${T.replace(/-/g, '')}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`,
+      uploadedAt: nowISO,
+      asOfDate: T,
+      uploadedBy: uploader || '',
+      baseDate: B,
+      sources,
+      weekly,
+      products,
+      receipts: parsed.receipt ? parsed.receipt.data : (prev && prev.receipts) || [],
+      lot: parsed.lot ? parsed.lot.data : (prev && prev.lot) || {},
+      salesIssue: issue.daily, coverIssue: issue.cover,
+      salesMove: move.daily, coverMove: move.cover
+    };
+    snap.checks = validate(snap, prev, parsed);
+    return snap;
+  }
+
+  /* ---------- 업로드 검증 (3.5, 경고만 하고 업로드는 허용) ---------- */
+  function validate(snap, prev, parsed) {
+    const out = [];
+    const add = (level, msg, items) => out.push({ level, msg, items: items || [] });
+    const LABEL = { weekly: '주간재고보고서', receipt: '입고현황', issue: '출고현황', transfer: '창고재고이동현황', lot: 'LOT재고현황', master: '품번마스터' };
+
+    for (const k of ['receipt', 'issue', 'transfer', 'lot']) {
+      const cur = parsed[k] && parsed[k].meta;
+      if (!cur) continue;
+      const old = prev && prev.sources && prev.sources[k];
+      if (old && old.totalBox > 0 && cur.totalBox <= old.totalBox * (1 - CONFIG.DROP_ALERT_PCT / 100))
+        add('warn', `${LABEL[k]}: 직전 업로드 대비 총 박스가 ${CONFIG.DROP_ALERT_PCT}% 이상 줄었습니다 (${old.totalBox.toLocaleString()} → ${cur.totalBox.toLocaleString()}). 조회 조건이 '전체'인지 확인하세요 (입고구분/출고구분/재고수량유무)`);
+      if (cur.nonBox) add('info', `${LABEL[k]}: 재고단위가 BOX가 아닌 ${cur.nonBox}건은 수량 집계에서 제외했습니다`);
+      if (cur.from && cur.from !== snap.baseDate)
+        add('warn', `${LABEL[k]}: 수불기간 시작일(${cur.from})이 보고서 기준일(${snap.baseDate})과 다릅니다. 수불기간 시작일을 보고서 기준일로 맞춰주세요`);
+    }
+    if (parsed.lot && parsed.lot.meta.zeroEnd === 0)
+      add('warn', 'LOT재고현황: 기말재고가 0인 행이 한 건도 없습니다. 재고수량유무 = 전체로 조회했는지 확인하세요');
+    if (parsed.receipt && parsed.receipt.meta.kinds.length === 1)
+      add('info', `입고현황: 입고구분 값이 '${parsed.receipt.meta.kinds[0]}' 한 종류뿐입니다. 입고구분 = 전체 조건 확인`);
+    if (parsed.issue && parsed.issue.meta.kinds.length === 1)
+      add('info', `출고현황: 출고구분 값이 '${parsed.issue.meta.kinds[0]}' 한 종류뿐입니다. 출고구분 = 전체 조건 확인`);
+    if (parsed.receipt && parsed.receipt.meta.adj) add('info', `입고현황: 재고조정 ${parsed.receipt.meta.adj}건은 입고 집계에서 제외했습니다`);
+
+    if (parsed.weekly) {
+      const mism = [];
+      for (const [code, rep] of Object.entries(snap.weekly.rep)) {
+        const s3 = snap.weekly.ship[code] ? snap.weekly.ship[code].s3.t * 1000 : 0;
+        if (Math.abs(rep.h - s3) > 1) mism.push(`${code} (H열 ${Math.round(rep.h).toLocaleString()}kg / 미통관 ${Math.round(s3).toLocaleString()}kg)`);
+      }
+      if (mism.length) add('warn', `합계 대사: 재고보고서 H열(미통관재고)과 2.미통관재고의 통관·검역 합계가 다른 품번 ${mism.length}개`, mism);
+    }
+    const P = Object.entries(snap.products);
+    const unreg = P.filter(([, p]) => p.registered === false).map(([c]) => c);
+    if (unreg.length) add('warn', `미등록 품번 ${unreg.length}개 (품번마스터에 없음 → 신규·미등록 표시)`, unreg);
+    if (!snap.sources.master) add('warn', '품번마스터가 아직 업로드되지 않았습니다. 규격은 재고보고서 E열로 대신 환산합니다');
+    const noKg = P.filter(([, p]) => p.kg == null).map(([c, p]) => `${c} (${p.spec || '규격 없음'})`);
+    if (noKg.length) add('warn', `환산 불가 ${noKg.length}개: 규격 앞 KG 값을 읽지 못해 톤/박스 환산을 할 수 없습니다. 마스터 보완 요청`, noKg);
+    const noOrigin = P.filter(([, p]) => !p.origin).map(([c]) => c);
+    if (noOrigin.length) add('info', `원산지 미확인 ${noOrigin.length}개 (품명에서 원산지 키워드를 찾지 못함)`, noOrigin);
+    const outRange = P.filter(([, p]) => !p.inRange).map(([c]) => c);
+    if (outRange.length) add('info', `범위 확인 필요 ${outRange.length}개: 2.미통관재고에만 있고 재고보고서 해외 범위에 없는 품번 (기획서 Q8)`, outRange);
+    return out;
+  }
+
+  /* ---------- 화면용 계산 (4장) ---------- */
+  function compute(snap, opts) {
+    const N = (opts && opts.velocityWindow) || 20;
+    const B = snap.baseDate, T = snap.asOfDate;
+    const inPeriod = d => d >= B && d <= T;
+
+    const recv = {};
+    for (const [d, code, wh, box] of snap.receipts) if (inPeriod(d) && !isExcludedWh(wh)) recv[code] = (recv[code] || 0) + box;
+
+    const coverSet = new Set([...(snap.coverIssue || []), ...(snap.coverMove || [])]);
+    const allCover = [...coverSet].filter(d => d <= T).sort();
+    const bizCover = allCover.filter(isBizDay).slice(-N);
+    const salesOn = (d, code) => ((snap.salesIssue[d] || {})[code] || 0) + ((snap.salesMove[d] || {})[code] || 0);
+
+    const products = [];
+    for (const [code, p] of Object.entries(snap.products)) {
+      const kg = p.kg;
+      const toTon = box => (box == null || kg == null ? null : box * kg / 1000);
+      const ship = snap.weekly.ship[code];
+      const shipStage = k => {
+        if (!ship) return { box: 0, ton: 0, est: false, n: 0 };
+        const s = ship[k];
+        const est = s.tu > 0;
+        const box = est ? (kg ? s.b + s.tu * 1000 / kg : null) : s.b;
+        return { box, ton: s.t, est, n: s.n };
+      };
+      const s1 = shipStage('s1'), s2 = shipStage('s2'), s3w = shipStage('s3');
+      const s4box = recv[code] || 0;
+
+      // 4.3 통관·검역 일할 차감
+      let s3 = { ...s3w }, recon = false;
+      if (s4box > 0) {
+        if (s3w.box == null) { s3 = { box: null, ton: null, est: s3w.est, n: s3w.n }; }
+        else {
+          const rest = s3w.box - s4box;
+          recon = rest < 0;
+          const box = Math.max(0, rest);
+          s3 = { box, ton: toTon(box), est: s3w.est, n: s3w.n };
+        }
+      }
+
+      const whs = (snap.lot[code]) || {};
+      let s5box = 0, exclBox = 0; const wh = {};
+      for (const [w, q] of Object.entries(whs)) {
+        if (isExcludedWh(w)) exclBox += q; else { s5box += q; if (q) wh[w] = q; }
+      }
+
+      let s6box = 0;
+      for (const d of allCover) if (inPeriod(d)) s6box += salesOn(d, code);
+
+      // 4.7 소진속도 · 안전재고 · 품절예측
+      const n = bizCover.length;
+      const V = n ? bizCover.reduce((a, d) => a + salesOn(d, code), 0) / n : null;
+      const S = V != null ? CONFIG.LEAD_TIME_DAYS * V : null;
+      let D = null, eta = null;
+      if (V > 0) { D = s5box / V; eta = addBizDays(T, Math.ceil(D)); }
+      const st = {
+        1: s1, 2: s2, 3: s3,
+        4: { box: s4box, ton: toTon(s4box), est: false },
+        5: { box: s5box, ton: toTon(s5box), est: false },
+        6: { box: s6box, ton: toTon(s6box), est: false }
+      };
+      const hasPipeline = [1, 2, 3].some(k => (st[k].ton || 0) > 0 || (st[k].box || 0) > 0);
+      products.push({
+        code, ...p, st, s3weekly: s3w, recon, wh, exclBox,
+        V, S, D, eta, sampleDays: n, sampleShort: n < N,
+        noSales: V === 0, urgent: D != null && D <= CONFIG.URGENT_DAYS, caution: S != null && V > 0 && s5box < S,
+        refill: S != null && V > 0 && s5box < S && hasPipeline,
+        s3wh: ship && ship.s3wh ? ship.s3wh : {}
+      });
+    }
+    return { B, T, N, bizCover, products };
+  }
+
+  return { CONFIG, str, normCode, toDate, toNum, parseKg, parseOrigin, isExcludedWh, whTag, isBizDay, addBizDays, detectType, PARSERS, buildSnapshot, compute };
+})();
+if (typeof module !== 'undefined') module.exports = Core;
+</script>
+
+<!-- ===================== 화면 ===================== -->
+<script>
+const STAGES = [
+  { k: 1, name: '해외생산', sub: '발주 · 출항 전', color: 'bg-slate-400' },
+  { k: 2, name: '선적·항해', sub: '출항 · 보세 미반입', color: 'bg-blue-500' },
+  { k: 3, name: '통관·검역', sub: '보세구역 반입', color: 'bg-indigo-500' },
+  { k: 4, name: '입고', sub: '수입 거래처 입고', color: 'bg-emerald-500' },
+  { k: 5, name: '보관', sub: '현재고', color: 'bg-saseRed' },
+  { k: 6, name: '출고', sub: '판매출고', color: 'bg-slate-700' },
+  { k: 7, name: '품절예측', sub: '예상 소진 영업일', color: 'bg-saseOrange' }
+];
+const SOURCE_INFO = [
+  { k: 'weekly', label: '주간재고보고서', cond: '재고보고서 · 2.미통관재고 시트 포함 (매주 1회)' },
+  { k: 'receipt', label: '입고현황', cond: '입고구분 = 전체, 수불기간 = 기준일 ~ 오늘' },
+  { k: 'issue', label: '출고현황', cond: '출고구분 = 전체, 수불기간 = 기준일 ~ 오늘' },
+  { k: 'transfer', label: '창고재고이동현황', cond: '수불기간 = 기준일 ~ 오늘' },
+  { k: 'lot', label: 'LOT재고현황', cond: '재고수량유무 = 전체, 수불기간 = 기준일 ~ 오늘' },
+  { k: 'master', label: '품번마스터', cond: '변경 시에만' }
+];
+
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('sase.' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('sase.' + k, JSON.stringify(v)); } catch (e) { /* 저장 불가 환경 */ } }
+};
+
+const state = {
+  unit: store.get('unit', 'TON'),
+  cols: store.get('cols', null) || Object.fromEntries(STAGES.map(s => [s.k, { top: 10, sort: s.k === 7 ? 'asc' : 'desc' }])),
+  velocityWindow: store.get('velocityWindow', 20),
+  index: { snapshots: [] },
+  snapCache: {},
+  snap: null,
+  view: null,
+  selected: null,
+  adminUnlocked: false,
+  pending: {},        // 업로드 대기 파일 { type: {file, book} }
+  draft: null         // 미리보기로 만든 스냅샷
+};
+let warehouseChartInstance = null;
+
+/* ---------- 공통 유틸 ---------- */
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const pad2 = n => String(n).padStart(2, '0');
+const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
+function fmtDateTime(iso) {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+function fmtMD(isoDate) { if (!isoDate) return '-'; const [, m, d] = isoDate.split('-'); return `${+m}/${+d}`; }
+function unitLabel() { return state.unit === 'TON' ? '톤' : '박스'; }
+function stageVal(p, k) {
+  if (k === 7) return p.D == null ? null : p.D;
+  const s = p.st[k];
+  return state.unit === 'TON' ? s.ton : s.box;
+}
+function fmtNum(v) {
+  if (v == null) return '-';
+  return state.unit === 'TON'
+    ? v.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+    : Math.round(v).toLocaleString();
+}
+function fmtStage(p, k, withUnit = true) {
+  const v = stageVal(p, k);
+  if (v == null) return '<span class="text-slate-400">-</span>';
+  const est = p.st[k].est && (state.unit === 'BOX') ? '≈' : '';
+  return `${est}${fmtNum(v)}${withUnit ? ` <span class="text-[10px] text-slate-400">${unitLabel()}</span>` : ''}`;
+}
+function fmtBox(v) { return v == null ? '-' : `${Math.round(v).toLocaleString()} 박스`; }
+function fmtQty(box, kg) {
+  if (state.unit === 'TON') return kg == null ? '-' : `${(box * kg / 1000).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} 톤`;
+  return fmtBox(box);
+}
+function toast(msg, ms = 4000) {
+  const t = document.getElementById('toast');
+  t.innerHTML = msg; t.classList.remove('hidden');
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.add('hidden'), ms);
+}
+function openModal(id) { const m = document.getElementById(id); m.classList.remove('hidden'); m.classList.add('flex'); }
+function closeModal(id) { const m = document.getElementById(id); m.classList.add('hidden'); m.classList.remove('flex'); }
+
+/* ---------- 현재 일시 · 데이터 기준 표시 ---------- */
+function tickClock() {
+  const d = new Date();
+  document.getElementById('nowClock').innerText =
+    `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} (${WEEK[d.getDay()]}) ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+function renderDataBasis() {
+  const main = document.getElementById('dataBasisMain');
+  const sub = document.getElementById('dataBasisSub');
+  const snap = state.snap;
+  if (!snap) { main.innerText = '업로드 데이터 없음'; sub.innerText = ''; }
+  else {
+    const d = new Date(snap.uploadedAt);
+    main.innerText = `${d.getMonth() + 1}월 ${d.getDate()}일 ${pad2(d.getHours())}:${pad2(d.getMinutes())} 업로드 기준`;
+    sub.innerText = `주간 기준일 ${snap.baseDate} · 수불기간 ${fmtMD(snap.baseDate)} ~ ${fmtMD(snap.asOfDate)}`;
+  }
+  const latest = state.index.snapshots[0];
+  const past = snap && latest && snap.id !== latest.id;
+  const badge = document.getElementById('pastViewBadge');
+  badge.classList.toggle('hidden', !past); badge.classList.toggle('flex', !!past);
+}
+
+/* ---------- 데이터 불러오기 (GitHub Pages의 data/ 폴더) ---------- */
+async function loadIndex() {
+  try {
+    const r = await fetch(`${CONFIG.DATA_DIR}/index.json?t=${Date.now()}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error(r.status);
+    const j = await r.json();
+    state.index = { snapshots: Array.isArray(j.snapshots) ? j.snapshots : [] };
+  } catch (e) {
+    state.index = { snapshots: [] };
+    if (location.protocol === 'file:')
+      document.getElementById('emptyStateDetail').innerText = '파일을 PC에서 직접 연 상태라 저장소 데이터를 읽을 수 없습니다. GitHub Pages 주소로 열어주세요.';
+  }
+}
+async function loadSnapshot(id) {
+  if (state.snapCache[id]) return state.snapCache[id];
+  const r = await fetch(`${CONFIG.DATA_DIR}/snapshots/${id}.json?t=${Date.now()}`, { cache: 'no-store' });
+  if (!r.ok) throw new Error(`데이터 파일을 불러오지 못했습니다 (${r.status})`);
+  const j = await r.json();
+  state.snapCache[id] = j;
+  return j;
+}
+function renderSnapshotSelect() {
+  const sel = document.getElementById('snapshotSelect');
+  const list = state.index.snapshots;
+  if (!list.length) { sel.innerHTML = '<option value="">업로드 이력 없음</option>'; return; }
+  sel.innerHTML = list.map((s, i) =>
+    `<option value="${esc(s.id)}">${esc(fmtDateTime(s.uploadedAt))} 업로드 · 주간 ${esc(fmtMD(s.baseDate))}${i === 0 ? ' (최신)' : ''}</option>`).join('');
+  if (state.snap) sel.value = state.snap.id;
+}
+async function showSnapshot(id) {
+  try {
+    const snap = await loadSnapshot(id);
+    setSnapshot(snap);
+  } catch (e) { toast(esc(e.message)); }
+}
+function setSnapshot(snap) {
+  state.snap = snap;
+  state.view = snap ? Core.compute(snap, { velocityWindow: state.velocityWindow }) : null;
+  if (state.view && !state.view.products.some(p => p.code === state.selected)) state.selected = defaultSelection();
+  buildOriginOptions();
+  renderSnapshotSelect();
+  renderDataBasis();
+  renderAll();
+}
+function defaultSelection() {
+  const ps = state.view.products.slice().sort((a, b) => (b.st[5].box || 0) - (a.st[5].box || 0));
+  return ps.length ? ps[0].code : null;
+}
+function onSnapshotSelect() {
+  const id = document.getElementById('snapshotSelect').value;
+  if (id) showSnapshot(id);
+}
+function selectLatestSnapshot() {
+  const latest = state.index.snapshots[0];
+  if (latest) showSnapshot(latest.id);
+}
+function onVelocityWindowChange() {
+  state.velocityWindow = +document.getElementById('velocityWindow').value;
+  store.set('velocityWindow', state.velocityWindow);
+  if (state.snap) setSnapshot(state.snap);
+}
+
+/* ---------- 필터 ---------- */
+function buildOriginOptions() {
+  const sel = document.getElementById('originFilter');
+  const cur = sel.value;
+  const set = new Set();
+  (state.view ? state.view.products : []).forEach(p => (p.origin || '').split('·').filter(Boolean).forEach(o => set.add(o)));
+  sel.innerHTML = '<option value="ALL">전체 원산지</option>' +
+    [...set].sort().map(o => `<option value="${esc(o)}">${esc(o)}산</option>`).join('') +
+    '<option value="NONE">원산지 미확인</option>';
+  sel.value = [...sel.options].some(o => o.value === cur) ? cur : 'ALL';
+}
+function filteredProducts() {
+  if (!state.view) return [];
+  const q = document.getElementById('searchInput').value.trim().toLowerCase();
+  const origin = document.getElementById('originFilter').value;
+  return state.view.products.filter(p => {
+    if (q && !(p.code.toLowerCase().includes(q) || p.raw.toLowerCase().includes(q) || p.name.toLowerCase().includes(q))) return false;
+    if (origin === 'NONE') return !p.origin;
+    if (origin !== 'ALL') return (p.origin || '').split('·').includes(origin);
+    return true;
+  });
+}
+
+/* ---------- 단위 토글 ---------- */
+function setGlobalUnit(unit) {
+  state.unit = unit;
+  store.set('unit', unit);
+  const on = 'px-3 py-1 rounded-md transition-all bg-white text-saseRed shadow-sm';
+  const off = 'px-3 py-1 rounded-md transition-all text-slate-500 hover:text-slate-900';
+  document.getElementById('unitTonBtn').className = unit === 'TON' ? on : off;
+  document.getElementById('unitBoxBtn').className = unit === 'BOX' ? on : off;
+  document.querySelectorAll('.currentUnitLabel').forEach(el => { el.innerText = unit === 'TON' ? '톤' : '박스'; });
+  renderAll();
+  if (!document.getElementById('warehouseModal').classList.contains('hidden')) openWarehouseModal(state.whModalCode);
+}
+
+/* ---------- 7단계 구역 ---------- */
+function setColOption(k, key, val) {
+  state.cols[k][key] = key === 'top' ? +val : val;
+  store.set('cols', state.cols);
+  renderColumns();
+}
+function renderColumns() {
+  const wrap = document.getElementById('stageColumns');
+  const items = filteredProducts();
+  document.getElementById('productCountBadge').innerText = state.view ? `(대상 ${items.length}개 품번${items.length !== state.view.products.length ? ` / 전체 ${state.view.products.length}개` : ''})` : '';
+
+  wrap.innerHTML = STAGES.map(stage => {
+    const k = stage.k;
+    const cfg = state.cols[k];
+    const withVal = items.map(p => ({ p, v: stageVal(p, k) }));
+    const valid = withVal.filter(x => x.v != null && (k === 7 || x.v > 0));
+    const nullCount = k === 7 ? 0 : withVal.filter(x => x.v == null && (x.p.st[k].box > 0 || x.p.st[k].ton > 0)).length;
+    const total = valid.reduce((a, x) => a + x.v, 0);
+    valid.sort((a, b) => cfg.sort === 'asc' ? a.v - b.v : b.v - a.v);
+    const shown = valid.slice(0, cfg.top);
+    const max = Math.max(...shown.map(x => x.v), 1e-9);
+
+    const sortOpts = k === 7
+      ? [['asc', '적은순'], ['desc', '많은순']]
+      : [['desc', '많은순'], ['asc', '적은순']];
+    const head = k === 7
+      ? `출고 있는 품번 ${valid.length}개 · <b class="text-saseRed">긴급 ${valid.filter(x => x.p.urgent).length}</b> · <b class="text-amber-600">주의 ${valid.filter(x => x.p.caution && !x.p.urgent).length}</b>`
+      : `품번 ${valid.length}개 · <b class="text-slate-800">${fmtNum(total)}${unitLabel()}</b>${nullCount ? ` <span class="text-slate-400">(환산불가 ${nullCount})</span>` : ''}`;
+
+    const list = shown.length ? shown.map(({ p, v }) => {
+      const sel = p.code === state.selected;
+      let valueHtml, barColor = stage.color;
+      if (k === 7) {
+        valueHtml = `D-${Math.floor(v).toLocaleString()}`;
+        barColor = p.urgent ? 'bg-saseRed' : p.caution ? 'bg-amber-400' : 'bg-emerald-500';
+      } else {
+        valueHtml = fmtStage(p, k, false);
+      }
+      const tag = k === 7 && p.urgent ? '<span class="ml-1 text-[9px] font-bold bg-red-100 text-red-700 px-1 rounded">긴급</span>'
+        : k === 7 && p.caution ? '<span class="ml-1 text-[9px] font-bold bg-amber-100 text-amber-800 px-1 rounded">주의</span>'
+        : p.registered === false ? '<span class="ml-1 text-[9px] font-bold bg-slate-200 text-slate-600 px-1 rounded">미등록</span>' : '';
+      const pct = Math.max(2, Math.round(v / max * 100));
+      return `<button onclick="selectProduct('${esc(p.code)}')" class="stage-item w-full text-left rounded-lg px-2 py-1.5 ${sel ? 'bg-red-50 ring-1 ring-saseRed' : 'hover:bg-red-50/50'}">
+        <div class="flex items-center justify-between gap-1 text-[11px]">
+          <span class="font-bold text-slate-900 truncate">${esc(p.raw)}${tag}</span>
+          <span class="font-extrabold text-slate-800 whitespace-nowrap tabular-nums">${valueHtml}</span>
+        </div>
+        <div class="text-[10px] text-slate-400 truncate">${esc(p.name)}</div>
+        <div class="mt-1 w-full bg-slate-100 rounded-full h-1.5 overflow-hidden"><div class="${barColor} h-1.5 rounded-full" style="width:${pct}%"></div></div>
+      </button>`;
+    }).join('') : '<div class="text-[11px] text-slate-400 text-center py-6">해당 상품 없음</div>';
+
+    const topSel = `<select onchange="setColOption(${k},'top',this.value)" class="flex-1 min-w-0 py-1 px-1 text-[11px] bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-saseRed">
+        ${[10, 20, 30].map(n => `<option value="${n}" ${cfg.top === n ? 'selected' : ''}>상위 ${n}개</option>`).join('')}</select>`;
+    const sortSel = `<select onchange="setColOption(${k},'sort',this.value)" class="flex-1 min-w-0 py-1 px-1 text-[11px] bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-saseRed">
+        ${sortOpts.map(([v, l]) => `<option value="${v}" ${cfg.sort === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+    const numColor = k === 7 ? 'bg-saseOrange' : 'bg-saseRed';
+    const colBorder = k === 5 ? 'border-2 border-saseRed bg-red-50/40' : k === 7 ? 'border border-saseOrange bg-amber-50/40' : 'border border-slate-200 bg-slate-50/60';
+    return `<div class="stage-col rounded-xl ${colBorder} flex flex-col min-w-0">
+      <div class="p-2.5 border-b border-slate-200/80 space-y-1.5">
+        <div class="flex items-center justify-between gap-1">
+          <div class="flex items-center gap-1.5 min-w-0">
+            <span class="w-5 h-5 shrink-0 rounded-full ${numColor} text-white text-[11px] font-extrabold flex items-center justify-center">${k}</span>
+            <span class="text-xs font-bold text-slate-800 truncate">${stage.name}</span>
+          </div>
+          <span class="text-[10px] text-slate-400 truncate">${stage.sub}</span>
+        </div>
+        <div class="text-[11px] text-slate-500 leading-snug">${state.view ? head : '-'}</div>
+        <div class="flex gap-1">${topSel}${sortSel}</div>
+      </div>
+      <div class="p-1.5 space-y-1">${state.view ? list : ''}</div>
+    </div>`;
+  }).join('');
+
+  if (state.view) {
+    const v = state.view;
+    document.getElementById('stageFootnote').innerText =
+      `①②③ 화물은 주간 기준일(${v.B}) 기준 · ③은 이후 수입 입고분을 품번별로 차감 · ④⑤⑥은 수불기간 ${v.B} ~ ${v.T} · ⑦은 최근 ${v.N}영업일 소진속도 기준 (보유 ${v.bizCover.length}영업일). 상품을 클릭하면 오른쪽에 7단계 수량이 표시됩니다.`;
+  }
+}
+
+/* ---------- 상품 상세 패널 ---------- */
+function selectProduct(code) {
+  state.selected = code;
+  renderColumns();
+  renderDetail();
+}
+function riskInfo(p) {
+  if (p.V == null) return { cls: 'bg-slate-100 text-slate-600', text: '출고 이력 없음' };
+  if (p.noSales) return { cls: 'bg-slate-100 text-slate-600', text: '출고 없음' };
+  const d = `D-${Math.floor(p.D)}`;
+  if (p.urgent) return { cls: 'bg-red-100 text-red-800', text: `품절 긴급 (${d})` };
+  if (p.caution) return { cls: 'bg-amber-100 text-amber-800', text: `안전재고 미달 (${d})` };
+  return { cls: 'bg-emerald-100 text-emerald-800', text: `재고 안정 (${d})` };
+}
+function renderDetail() {
+  const empty = document.getElementById('detailEmpty');
+  const body = document.getElementById('detailBody');
+  const p = state.view && state.view.products.find(x => x.code === state.selected);
+  if (!p) { empty.classList.remove('hidden'); body.classList.add('hidden'); return; }
+  empty.classList.add('hidden'); body.classList.remove('hidden');
+  const v = state.view;
+
+  document.getElementById('detailBadgeCode').innerText = p.raw;
+  document.getElementById('detailBadgeOrigin').innerText = p.origin ? `${p.origin}산` : '원산지 미확인';
+  const risk = riskInfo(p);
+  const rb = document.getElementById('detailRiskBadge');
+  rb.className = `text-xs font-bold px-2 py-0.5 rounded ${risk.cls}`; rb.innerText = risk.text;
+  document.getElementById('detailProductName').innerText = p.name || p.code;
+  document.getElementById('detailSpec').innerText =
+    `규격: ${p.spec || '-'} · 박스당 ${p.kg != null ? p.kg + 'kg' : '환산 불가'}${p.group ? ' · ' + p.group : ''}${p.channel ? ' · ' + p.channel : ''}`;
+
+  const flags = [];
+  if (p.registered === false) flags.push(['bg-slate-200 text-slate-700', '신규·미등록']);
+  if (!p.inRange) flags.push(['bg-amber-100 text-amber-800', '범위 확인 필요']);
+  if (p.kg == null) flags.push(['bg-slate-200 text-slate-700', '환산 불가']);
+  if (p.recon) flags.push(['bg-red-100 text-red-700', '대사 필요']);
+  if (p.V != null && p.sampleShort) flags.push(['bg-slate-100 text-slate-600', `표본 부족(${p.sampleDays}일)`]);
+  if (p.refill) flags.push(['bg-blue-100 text-blue-800', '보충 물량 진행 중']);
+  document.getElementById('detailFlags').innerHTML = flags.map(([c, t]) => `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded ${c}">${t}</span>`).join('');
+
+  const desc = {
+    1: `화물 ${p.st[1].n}건 · ETD 미래 또는 미정`,
+    2: `화물 ${p.st[2].n}건 · ETD ≤ ${v.B}`,
+    3: p.st[4].box > 0
+      ? `주간 ${fmtStageObj(p.s3weekly, p.kg)} − 수입 입고 ${fmtStageObj(p.st[4], p.kg)} (화물 ${p.st[3].n}건)`
+      : `화물 ${p.st[3].n}건 · 보세구역 반입`,
+    4: `수입 거래처 입고 · ${fmtMD(v.B)} ~ ${fmtMD(v.T)}`,
+    5: `창고 ${Object.keys(p.wh).length}곳${p.exclBox ? ` · 제외 창고 ${Math.round(p.exclBox).toLocaleString()}박스 별도` : ''}`,
+    6: `판매출고 · ${fmtMD(v.B)} ~ ${fmtMD(v.T)} (온라인 버츄얼 이동 포함)`
+  };
+  const vals = [1, 2, 3, 4, 5, 6].map(k => stageVal(p, k) || 0);
+  const max = Math.max(...vals, 1e-9);
+  document.getElementById('detailPipelineTotal').innerText =
+    `①~⑤ 합계: ${fmtNum([1, 2, 3, 4, 5].reduce((a, k) => a + (stageVal(p, k) || 0), 0))}${unitLabel()}`;
+  document.getElementById('detailPipelineBars').innerHTML = STAGES.slice(0, 6).map(s => {
+    const val = stageVal(p, s.k);
+    const pct = val ? Math.max(1, Math.round(val / max * 100)) : 0;
+    return `<div class="space-y-1">
+      <div class="flex justify-between items-center text-xs">
+        <span class="font-bold text-slate-700">${s.k}. ${s.name}</span>
+        <span class="font-extrabold text-slate-900">${val ? fmtStage(p, s.k) : '<span class="text-slate-300">-</span>'}</span>
+      </div>
+      <div class="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden flex">
+        <div class="${s.color} h-2.5 rounded-full transition-all duration-500" style="width:${pct}%"></div>
+      </div>
+      <div class="text-[10px] text-slate-400">${desc[s.k]}${s.k === 3 && p.recon ? ' <b class="text-red-600">· 입고가 주간 물량보다 많음 (대사 필요)</b>' : ''}</div>
+    </div>`;
+  }).join('');
+
+  const f = document.getElementById('detailForecast');
+  if (p.V == null) {
+    f.innerHTML = `<p class="font-bold text-amber-900 mb-1">7. 품절예측</p><p class="text-amber-800">출고 이력이 없어 소진속도를 계산할 수 없습니다.</p>`;
+  } else {
+    const barMax = Math.max(p.st[5].box, p.S || 0, 1e-9);
+    f.innerHTML = `
+      <div class="flex items-center justify-between mb-2">
+        <p class="font-bold text-amber-900">7. 품절예측</p>
+        <span class="text-[10px] text-amber-700">최근 ${v.N}영업일 기준${p.sampleShort ? ` (보유 ${p.sampleDays}일)` : ''}</span>
+      </div>
+      <div class="grid grid-cols-3 gap-2 mb-2">
+        <div><span class="text-[10px] text-amber-700 block">일평균 소진</span><b class="text-slate-900">${p.V.toLocaleString(undefined, { maximumFractionDigits: 1 })} 박스/일</b></div>
+        <div><span class="text-[10px] text-amber-700 block">예상 소진일수</span><b class="${p.urgent ? 'text-saseRed' : 'text-slate-900'}">${p.D != null ? Math.floor(p.D).toLocaleString() + ' 영업일' : '출고 없음'}</b></div>
+        <div><span class="text-[10px] text-amber-700 block">예상 소진일</span><b class="text-slate-900">${p.eta || '-'}</b></div>
+      </div>
+      <div class="space-y-1">
+        <div class="flex justify-between text-[11px]"><span class="text-slate-600">현재 보관</span><b>${fmtBox(p.st[5].box)}</b></div>
+        <div class="w-full bg-white rounded-full h-2 overflow-hidden"><div class="${p.caution ? 'bg-amber-400' : 'bg-saseRed'} h-2 rounded-full" style="width:${Math.round(p.st[5].box / barMax * 100)}%"></div></div>
+        <div class="flex justify-between text-[11px]"><span class="text-slate-600">최소 보관수량 (${CONFIG.LEAD_TIME_DAYS}일 × 소진속도)</span><b>${fmtBox(p.S)}</b></div>
+        <div class="w-full bg-white rounded-full h-2 overflow-hidden"><div class="bg-slate-400 h-2 rounded-full" style="width:${Math.round((p.S || 0) / barMax * 100)}%"></div></div>
+      </div>
+      ${p.refill ? '<p class="mt-2 text-[11px] font-bold text-blue-700"><i class="fa-solid fa-ship"></i> 보충 물량 진행 중 (①~③에 물량 있음)</p>' : ''}`;
+  }
+
+  const whs = Object.entries(p.wh).sort((a, b) => b[1] - a[1]);
+  document.getElementById('miniWarehouseTitle').innerText = `주요 보관 창고 (보관 ${fmtQty(p.st[5].box, p.kg)})`;
+  document.getElementById('miniWarehouseList').innerHTML = whs.length ? whs.slice(0, 3).map(([w, q]) => `
+    <div class="flex items-center justify-between text-slate-600 gap-2">
+      <span class="truncate">${esc(w)}</span>
+      <span class="font-bold text-slate-800 whitespace-nowrap">${fmtQty(q, p.kg)} (${Math.round(q / p.st[5].box * 100)}%)</span>
+    </div>`).join('') : '<p class="text-slate-400">보관 재고 없음</p>';
+  document.getElementById('detailNote').innerText = `화물 수량은 ${v.B} 주간 보고서 기준 (주 1회 갱신).`;
+}
+function fmtStageObj(s, kg) {
+  if (state.unit === 'TON') return s.ton == null ? '-' : `${s.ton.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}톤`;
+  return s.box == null ? '-' : `${s.est ? '≈' : ''}${Math.round(s.box).toLocaleString()}박스`;
+}
+
+function renderAll() {
+  const has = !!state.view;
+  document.getElementById('emptyState').classList.toggle('hidden', has);
+  document.getElementById('mainGrid').classList.toggle('hidden', !has);
+  renderColumns();
+  renderDetail();
+}
+
+/* ---------- 창고 모달 ---------- */
+function openWarehouseModalForSelected() { openWarehouseModal(state.selected); }
+function openWarehouseModal(code) {
+  if (!state.view) { toast('표시할 데이터가 없습니다.'); return; }
+  state.whModalCode = code;
+  const products = code ? state.view.products.filter(p => p.code === code) : filteredProducts();
+  const single = code ? products[0] : null;
+  document.getElementById('modalTargetProductName').innerText = single ? `[${single.raw} ${single.name}]` : `[전체 대상 품번 ${products.length}개 종합]`;
+  document.getElementById('modalWarehouseSub').innerText =
+    `LOT재고현황 기말재고 기준 (${state.snap.sources.lot ? '파일: ' + state.snap.sources.lot.file : '업로드 없음'})${state.unit === 'TON' ? ' · 톤 = 박스 × 박스당kg ÷ 1,000 (환산 불가 품번 제외)' : ''}`;
+
+  // 창고별 합계 (현재 단위, 환산 불가 품번은 톤 모드에서 제외)
+  const rows = {};
+  let excluded = 0, customs = 0;
+  for (const p of products) {
+    const conv = q => state.unit === 'TON' ? (p.kg == null ? 0 : q * p.kg / 1000) : q;
+    for (const [w, q] of Object.entries(state.snap.lot[p.code] || {})) {
+      if (!q) continue;
+      rows[w] = (rows[w] || 0) + conv(q);
+      if (Core.isExcludedWh(w)) excluded += conv(q);
+    }
+    customs += (stageVal(p, 3) || 0);
+  }
+  const list = Object.entries(rows).map(([w, v]) => ({ w, v, ex: Core.isExcludedWh(w) })).sort((a, b) => b.v - a.v);
+  const counted = list.filter(x => !x.ex);
+  const total = counted.reduce((a, x) => a + x.v, 0);
+  const u = unitLabel();
+  document.getElementById('modalWhCount').innerText = `${counted.filter(x => x.v > 0).length}곳`;
+  document.getElementById('modalStockTotal').innerText = `${fmtNum(total)} ${u}`;
+  document.getElementById('modalExcludedTotal').innerText = `${fmtNum(excluded)} ${u}`;
+  document.getElementById('modalCustomsTotal').innerText = `${fmtNum(customs)} ${u}`;
+
+  document.getElementById('modalWarehouseTableBody').innerHTML = list.length ? list.map(x => `
+    <tr class="${x.ex ? 'bg-slate-50 text-slate-400' : 'hover:bg-slate-50'}">
+      <td class="py-2.5 px-3 font-bold ${x.ex ? '' : 'text-slate-900'}">${esc(x.w)}</td>
+      <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-600">${esc(Core.whTag(x.w) || '-')}</span></td>
+      <td class="py-2.5 px-3 text-right font-bold">${fmtNum(x.v)} ${u}</td>
+      <td class="py-2.5 px-3 text-center">${x.ex ? '-' : `<span class="bg-slate-100 text-slate-700 font-bold px-1.5 py-0.5 rounded text-[10px]">${total ? Math.round(x.v / total * 100) : 0}%</span>`}</td>
+      <td class="py-2.5 px-3 text-center">${x.ex ? '<span class="text-[10px] font-semibold">집계 제외</span>' : ''}</td>
+    </tr>`).join('') : '<tr><td colspan="5" class="py-6 text-center text-slate-400">보관 재고 없음</td></tr>';
+
+  openModal('warehouseModal');
+  const top = counted.slice(0, 15);
+  const ctx = document.getElementById('warehouseChart').getContext('2d');
+  if (warehouseChartInstance) warehouseChartInstance.destroy();
+  warehouseChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: top.map(x => x.w),
+      datasets: [{ label: `보관 (${u})`, data: top.map(x => state.unit === 'TON' ? +x.v.toFixed(1) : Math.round(x.v)), backgroundColor: '#C8102E', borderRadius: 4 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: c => `보관: ${c.raw.toLocaleString()} ${u}` } }
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 10, family: 'Pretendard' }, maxRotation: 45, minRotation: 30 } },
+        y: { beginAtZero: true, ticks: { font: { size: 10, family: 'Pretendard' } } }
+      }
+    }
+  });
+}
+
+/* ---------- 출력: 인쇄 · 이미지 · PDF ---------- */
+function printView() { window.print(); }
+function captureName(ext) {
+  const d = new Date();
+  const base = state.snap ? `_${state.snap.id}` : '';
+  return `SASE_통합현황판${base}_출력${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}-${pad2(d.getHours())}${pad2(d.getMinutes())}.${ext}`;
+}
+// 캡처 동안만 고정 헤더·푸터를 풀고, 가로 스크롤 영역을 펼쳐서 전체를 한 장으로 찍는다
+async function captureCanvas() {
+  toast('화면을 캡처하는 중입니다...', 15000);
+  const root = document.getElementById('captureRoot');
+  const scroller = document.getElementById('stageScroller');
+  const width = Math.max(root.scrollWidth, root.scrollWidth + scroller.scrollWidth - scroller.clientWidth);
+  document.body.classList.add('capturing');
+  root.style.width = `${width}px`;
+  try {
+    return await htmlToImage.toCanvas(root, {
+      pixelRatio: 2, backgroundColor: '#F1F4F9', width, height: root.scrollHeight,
+      filter: node => !(node.dataset && node.dataset.captureIgnore !== undefined)
+    });
+  } finally {
+    root.style.width = '';
+    document.body.classList.remove('capturing');
+    document.getElementById('toast').classList.add('hidden');
+  }
+}
+async function exportImage() {
+  try {
+    const canvas = await captureCanvas();
+    const a = document.createElement('a');
+    a.href = canvas.toDataURL('image/png');
+    a.download = captureName('png');
+    a.click();
+  } catch (e) { toast('이미지 저장에 실패했습니다: ' + esc(e.message)); }
+}
+async function exportPdf() {
+  try {
+    const canvas = await captureCanvas();
+    const { jsPDF } = window.jspdf;
+    const w = 420, h = canvas.height * w / canvas.width;          // A3 가로 폭에 맞춘 한 장
+    const pdf = new jsPDF({ orientation: w > h ? 'landscape' : 'portrait', unit: 'mm', format: [w, h] });
+    pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, w, h);
+    pdf.save(captureName('pdf'));
+  } catch (e) { toast('PDF 저장에 실패했습니다: ' + esc(e.message)); }
+}
+
+/* ---------- 관리자 확인 (화면단 비밀번호: 실수 방지용) ---------- */
+let passwordResolver = null;
+function requireAdmin() {
+  if (state.adminUnlocked) return Promise.resolve(true);
+  return new Promise(res => {
+    passwordResolver = res;
+    document.getElementById('adminPasswordInput').value = '';
+    document.getElementById('passwordError').classList.add('hidden');
+    openModal('passwordModal');
+    setTimeout(() => document.getElementById('adminPasswordInput').focus(), 50);
+  });
+}
+function resolvePassword(submit) {
+  if (submit) {
+    if (document.getElementById('adminPasswordInput').value !== CONFIG.ADMIN_PASSWORD) {
+      document.getElementById('passwordError').classList.remove('hidden');
+      return;
+    }
+    state.adminUnlocked = true;
+  }
+  closeModal('passwordModal');
+  if (passwordResolver) { passwordResolver(!!submit); passwordResolver = null; }
+}
+
+/* ---------- 깃허브 저장소 연동 ---------- */
+function ghConfig(tokenInputId) {
+  const cfg = {
+    owner: document.getElementById('ghOwner').value.trim(),
+    repo: document.getElementById('ghRepo').value.trim(),
+    branch: document.getElementById('ghBranch').value.trim() || 'main',
+    token: document.getElementById(tokenInputId).value.trim()
+  };
+  if (!cfg.owner || !cfg.repo) throw new Error('깃허브 소유자(owner)와 저장소(repo)를 입력하세요');
+  if (!cfg.token) throw new Error('깃허브 접근 토큰을 입력하세요');
+  store.set('repo', { owner: cfg.owner, repo: cfg.repo, branch: cfg.branch });
+  return cfg;
+}
+function loadRepoFields() {
+  const saved = store.get('repo', null);
+  let owner = '', repo = '';
+  if (location.hostname.endsWith('.github.io')) {
+    owner = location.hostname.split('.')[0];
+    repo = location.pathname.split('/').filter(Boolean)[0] || `${owner}.github.io`;
+    if (repo.endsWith('.html')) repo = `${owner}.github.io`;
+  }
+  document.getElementById('ghOwner').value = (saved && saved.owner) || owner;
+  document.getElementById('ghRepo').value = (saved && saved.repo) || repo;
+  document.getElementById('ghBranch').value = (saved && saved.branch) || 'main';
+  document.getElementById('uploaderName').value = store.get('uploader', '');
+}
+function b64(text) {
+  const bytes = new TextEncoder().encode(text);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+async function ghFetch(cfg, method, path, body, accept) {
+  const url = `https://api.github.com/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}/contents/${path}` +
+    (method === 'GET' ? `?ref=${encodeURIComponent(cfg.branch)}&t=${Date.now()}` : '');
+  const res = await fetch(url, {
+    method,
+    headers: {
+      Authorization: `Bearer ${cfg.token}`,
+      Accept: accept || 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      ...(body ? { 'Content-Type': 'application/json' } : {})
+    },
+    body: body ? JSON.stringify(body) : undefined,
+    cache: 'no-store'
+  });
+  if (res.ok || (method === 'GET' && res.status === 404)) return res;
+  let detail = '';
+  try { detail = (await res.json()).message || ''; } catch (e) { /* 본문 없음 */ }
+  const hint = {
+    401: '토큰이 올바르지 않거나 만료되었습니다',
+    403: '토큰 권한이 부족합니다 (Contents: Read and write 필요)',
+    404: '저장소 또는 브랜치를 찾을 수 없습니다 (owner/repo/branch와 토큰의 저장소 접근 범위 확인)',
+    409: '다른 변경과 충돌했습니다. 잠시 후 다시 시도하세요',
+    422: '요청 형식 오류 또는 충돌입니다. 잠시 후 다시 시도하세요'
+  }[res.status] || '깃허브 요청 실패';
+  throw new Error(`${hint} (${res.status}${detail ? ': ' + detail : ''})`);
+}
+async function ghGetJson(cfg, path) {
+  const r = await ghFetch(cfg, 'GET', path, null, 'application/vnd.github.raw+json');
+  return r.status === 404 ? null : JSON.parse(await r.text());
+}
+async function ghGetSha(cfg, path) {
+  const r = await ghFetch(cfg, 'GET', path);
+  return r.status === 404 ? null : (await r.json()).sha;
+}
+async function ghPut(cfg, path, text, message, sha) {
+  const body = { message, content: b64(text), branch: cfg.branch };
+  if (sha) body.sha = sha;
+  await ghFetch(cfg, 'PUT', path, body);
+}
+async function ghDelete(cfg, path, message, sha) {
+  await ghFetch(cfg, 'DELETE', path, { message, sha, branch: cfg.branch });
+}
+
+/* ---------- 업로드 ---------- */
+async function openUploadModal() {
+  if (!(await requireAdmin())) return;
+  loadRepoFields();
+  state.pending = {}; state.draft = null;
+  document.getElementById('ghToken').value = '';
+  document.getElementById('uploadResult').classList.add('hidden');
+  document.getElementById('uploadStatus').innerText = '';
+  document.getElementById('commitBtn').disabled = true;
+  renderUploadSlots();
+  openModal('uploadModal');
+}
+function closeUploadModal() {
+  document.getElementById('ghToken').value = '';
+  state.pending = {}; state.draft = null;
+  closeModal('uploadModal');
+}
+function renderUploadSlots() {
+  const prev = state.index.snapshots[0];
+  document.getElementById('uploadSlotBody').innerHTML = SOURCE_INFO.map(s => {
+    const f = state.pending[s.k];
+    const cell = f
+      ? `<span class="text-emerald-700 font-bold"><i class="fa-solid fa-check"></i> ${esc(f.file)}</span>
+         <button onclick="removePending('${s.k}')" class="ml-1 text-slate-400 hover:text-red-600" title="빼기"><i class="fa-solid fa-xmark"></i></button>`
+      : `<span class="text-slate-400">${prev ? '직전 업로드분 이어받음' : (s.k === 'weekly' ? '<b class="text-red-600">필수</b>' : '없음')}</span>`;
+    return `<tr><td class="py-2 px-3 font-bold text-slate-800">${s.label}</td><td class="py-2 px-3 text-slate-500">${s.cond}</td><td class="py-2 px-3">${cell}</td></tr>`;
+  }).join('');
+}
+function removePending(k) { delete state.pending[k]; state.draft = null; document.getElementById('commitBtn').disabled = true; renderUploadSlots(); }
+
+function bookFromWorkbook(wb) {
+  const cache = {};
+  return {
+    sheetNames: wb.SheetNames,
+    rows(name) {
+      if (cache[name]) return cache[name];
+      const ws = wb.Sheets[name];
+      if (!ws || !ws['!ref']) return (cache[name] = []);
+      const end = XLSX.utils.decode_range(ws['!ref']).e;
+      return (cache[name] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: true, range: { s: { r: 0, c: 0 }, e: end } }));
+    },
+    cell(name, addr) { const ws = wb.Sheets[name]; return ws && ws[addr] ? ws[addr].v : null; }
+  };
+}
+async function handleFiles(fileList) {
+  const status = document.getElementById('uploadStatus');
+  for (const file of fileList) {
+    try {
+      status.innerText = `${file.name} 읽는 중...`;
+      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: false });
+      const book = bookFromWorkbook(wb);
+      const type = Core.detectType(book);
+      if (!type) { toast(`${esc(file.name)}: 어떤 자료인지 인식하지 못했습니다. 원본 양식 그대로인지 확인하세요.`, 6000); continue; }
+      state.pending[type] = { file: file.name, book };
+    } catch (e) { toast(`${esc(file.name)}: 파일을 읽지 못했습니다 (${esc(e.message)})`, 6000); }
+  }
+  status.innerText = '';
+  state.draft = null;
+  document.getElementById('commitBtn').disabled = true;
+  renderUploadSlots();
+}
+(function initDrop() {
+  const z = document.getElementById('dropZone');
+  z.addEventListener('dragover', e => { e.preventDefault(); z.classList.add('ring-2', 'ring-saseRed'); });
+  z.addEventListener('dragleave', () => z.classList.remove('ring-2', 'ring-saseRed'));
+  z.addEventListener('drop', e => { e.preventDefault(); z.classList.remove('ring-2', 'ring-saseRed'); handleFiles(Array.from(e.dataTransfer.files)); });
+})();
+
+async function analyzeUpload() {
+  const status = document.getElementById('uploadStatus');
+  const out = document.getElementById('uploadResult');
+  document.getElementById('commitBtn').disabled = true;
+  state.draft = null;
+  try {
+    if (!Object.keys(state.pending).length) throw new Error('올릴 엑셀 파일을 먼저 선택하세요');
+    const cfg = ghConfig('ghToken');
+    status.innerText = '저장소의 최신 데이터를 확인하는 중...';
+    const index = (await ghGetJson(cfg, `${CONFIG.DATA_DIR}/index.json`)) || { snapshots: [] };
+    const latest = index.snapshots && index.snapshots[0];
+    const prev = latest ? await ghGetJson(cfg, `${CONFIG.DATA_DIR}/snapshots/${latest.id}.json`) : null;
+    const masterStore = state.pending.master ? null : await ghGetJson(cfg, `${CONFIG.DATA_DIR}/master.json`);
+
+    status.innerText = '엑셀을 분석하는 중...';
+    const parsed = {};
+    for (const [k, f] of Object.entries(state.pending)) {
+      try { parsed[k] = { ...Core.PARSERS[k](f.book), file: f.file }; }
+      catch (e) { throw new Error(`${f.file}: ${e.message}`); }
+    }
+    const uploader = document.getElementById('uploaderName').value.trim();
+    store.set('uploader', uploader);
+    const snap = Core.buildSnapshot({ prev, parsed, masterStore, now: new Date(), uploader });
+    const view = Core.compute(snap, { velocityWindow: state.velocityWindow });
+    state.draft = { snap, parsed, index, latestId: latest ? latest.id : null };
+
+    const sum = k => view.products.reduce((a, p) => a + (p.st[k].ton || 0), 0);
+    const srcRows = SOURCE_INFO.map(s => {
+      const m = snap.sources[s.k];
+      if (!m) return `<tr><td class="py-1.5 px-2 font-semibold">${s.label}</td><td class="py-1.5 px-2 text-slate-400" colspan="2">없음</td></tr>`;
+      const period = m.baseDate ? `기준일 ${m.baseDate}` : m.from ? `${m.from} ~ ${m.to}` : '';
+      const qty = m.totalBox != null ? `${m.rows.toLocaleString()}건 · ${Math.round(m.totalBox).toLocaleString()}박스` : `${(m.rows || 0).toLocaleString()}건`;
+      return `<tr><td class="py-1.5 px-2 font-semibold">${s.label}</td>
+        <td class="py-1.5 px-2">${m.fresh ? '<b class="text-emerald-700">새로 올림</b>' : '<span class="text-slate-400">이어받음</span>'} · ${esc(m.file || '')}</td>
+        <td class="py-1.5 px-2 text-slate-500">${esc(period)} · ${qty}</td></tr>`;
+    }).join('');
+    const checks = snap.checks.map(c => `
+      <details class="${c.level === 'warn' ? 'bg-amber-50 border-amber-200 text-amber-900' : 'bg-slate-50 border-slate-200 text-slate-700'} border rounded-lg px-3 py-2">
+        <summary class="cursor-pointer"><b>${c.level === 'warn' ? '경고' : '참고'}</b> · ${esc(c.msg)}</summary>
+        ${c.items.length ? `<p class="mt-1 text-[11px] break-words">${c.items.map(esc).join(', ')}</p>` : ''}
+      </details>`).join('');
+    out.innerHTML = `
+      <p class="font-bold text-slate-800">검증 결과 (경고가 있어도 저장할 수 있습니다)</p>
+      <table class="w-full border border-slate-200 rounded-lg overflow-hidden"><tbody class="divide-y divide-slate-100">${srcRows}</tbody></table>
+      <div class="grid grid-cols-5 gap-2 text-center">
+        ${[1, 2, 3, 4, 5].map(k => `<div class="bg-white border border-slate-200 rounded-lg p-2"><div class="text-[10px] text-slate-400">${STAGES[k - 1].name}</div><b>${sum(k).toLocaleString(undefined, { maximumFractionDigits: 1 })}톤</b></div>`).join('')}
+      </div>
+      <div class="space-y-1.5">${checks || '<p class="text-emerald-700">경고 없음</p>'}</div>`;
+    out.classList.remove('hidden');
+    status.innerText = `미리보기 완료: 주간 기준일 ${snap.baseDate}, 수불기간 ${snap.baseDate} ~ ${snap.asOfDate}`;
+    document.getElementById('commitBtn').disabled = false;
+  } catch (e) {
+    status.innerHTML = `<span class="text-red-600 font-semibold">${esc(e.message)}</span>`;
+  }
+}
+
+async function commitUpload() {
+  const status = document.getElementById('uploadStatus');
+  const draft = state.draft;
+  if (!draft) return;
+  const btn = document.getElementById('commitBtn');
+  btn.disabled = true;
+  try {
+    const cfg = ghConfig('ghToken');
+    status.innerText = '저장소 상태를 다시 확인하는 중...';
+    const indexSha = await ghGetSha(cfg, `${CONFIG.DATA_DIR}/index.json`);
+    const current = (await ghGetJson(cfg, `${CONFIG.DATA_DIR}/index.json`)) || { snapshots: [] };
+    const curLatest = current.snapshots && current.snapshots[0] ? current.snapshots[0].id : null;
+    if (curLatest !== draft.latestId) throw new Error('미리보기 이후 다른 업로드·삭제가 있었습니다. [1. 검증·미리보기]를 다시 눌러주세요');
+
+    const snap = draft.snap;
+    const fresh = SOURCE_INFO.filter(s => draft.parsed[s.k]).map(s => s.label);
+    if (draft.parsed.master) {
+      status.innerText = '품번마스터 저장 중...';
+      const master = { meta: { file: draft.parsed.master.file, uploadedAt: snap.uploadedAt, rows: draft.parsed.master.meta.rows }, items: draft.parsed.master.data.items };
+      await ghPut(cfg, `${CONFIG.DATA_DIR}/master.json`, JSON.stringify(master), `품번마스터 업데이트 (${snap.id})`, await ghGetSha(cfg, `${CONFIG.DATA_DIR}/master.json`));
+    }
+    status.innerText = '업로드 데이터 저장 중...';
+    await ghPut(cfg, `${CONFIG.DATA_DIR}/snapshots/${snap.id}.json`, JSON.stringify(snap), `데이터 업로드 ${snap.id}: ${fresh.join(', ')}`);
+    status.innerText = '업로드 목록 갱신 중...';
+    const entry = { id: snap.id, uploadedAt: snap.uploadedAt, uploadedBy: snap.uploadedBy, baseDate: snap.baseDate, asOfDate: snap.asOfDate, fresh };
+    const next = { snapshots: [entry, ...(current.snapshots || []).filter(s => s.id !== snap.id)] };
+    await ghPut(cfg, `${CONFIG.DATA_DIR}/index.json`, JSON.stringify(next, null, 1), `업로드 목록 갱신 ${snap.id}`, indexSha);
+
+    state.index = next;
+    state.snapCache[snap.id] = snap;
+    closeUploadModal();
+    setSnapshot(snap);
+    toast('저장했습니다. 다른 사람 화면에는 GitHub Pages 반영 후(보통 1~2분) 보입니다.', 7000);
+  } catch (e) {
+    status.innerHTML = `<span class="text-red-600 font-semibold">${esc(e.message)}</span>`;
+    btn.disabled = false;
+  }
+}
+
+/* ---------- 삭제 ---------- */
+async function openDeleteModal() {
+  if (!(await requireAdmin())) return;
+  loadRepoFields();
+  document.getElementById('ghTokenDelete').value = '';
+  document.getElementById('deleteStatus').innerText = '';
+  const o = document.getElementById('ghOwner').value, r = document.getElementById('ghRepo').value, b = document.getElementById('ghBranch').value;
+  document.getElementById('deleteRepoLabel').innerText = o && r ? `${o}/${r} (${b})` : '미설정 — 업로드 창에서 먼저 입력하세요';
+  const list = state.index.snapshots;
+  document.getElementById('deleteListBody').innerHTML = list.length ? list.map((s, i) => `
+    <tr>
+      <td class="py-2 px-3"><input type="checkbox" class="del-check" value="${esc(s.id)}"></td>
+      <td class="py-2 px-3 font-semibold">${esc(fmtDateTime(s.uploadedAt))}${i === 0 ? ' <span class="text-[10px] text-saseRed">(최신)</span>' : ''}</td>
+      <td class="py-2 px-3">${esc(s.baseDate)}</td>
+      <td class="py-2 px-3 text-slate-500">${esc((s.fresh || []).join(', '))}</td>
+      <td class="py-2 px-3 text-slate-500">${esc(s.uploadedBy || '-')}</td>
+    </tr>`).join('') : '<tr><td colspan="5" class="py-6 text-center text-slate-400">업로드 이력이 없습니다</td></tr>';
+  openModal('deleteModal');
+}
+function closeDeleteModal() {
+  document.getElementById('ghTokenDelete').value = '';
+  closeModal('deleteModal');
+}
+async function deleteSelectedSnapshots() {
+  const status = document.getElementById('deleteStatus');
+  const ids = [...document.querySelectorAll('.del-check:checked')].map(c => c.value);
+  if (!ids.length) { status.innerText = '삭제할 항목을 선택하세요'; return; }
+  const labels = state.index.snapshots.filter(s => ids.includes(s.id)).map(s => fmtDateTime(s.uploadedAt));
+  if (!confirm(`다음 ${ids.length}건의 업로드 데이터를 삭제합니다.\n\n${labels.join('\n')}\n\n계속할까요?`)) return;
+  const btn = document.getElementById('deleteBtn');
+  btn.disabled = true;
+  try {
+    const cfg = ghConfig('ghTokenDelete');
+    for (const id of ids) {
+      status.innerText = `${id} 삭제 중...`;
+      const path = `${CONFIG.DATA_DIR}/snapshots/${id}.json`;
+      const sha = await ghGetSha(cfg, path);
+      if (sha) await ghDelete(cfg, path, `데이터 삭제 ${id}`, sha);
+    }
+    status.innerText = '업로드 목록 갱신 중...';
+    const indexSha = await ghGetSha(cfg, `${CONFIG.DATA_DIR}/index.json`);
+    const current = (await ghGetJson(cfg, `${CONFIG.DATA_DIR}/index.json`)) || { snapshots: [] };
+    const next = { snapshots: (current.snapshots || []).filter(s => !ids.includes(s.id)) };
+    await ghPut(cfg, `${CONFIG.DATA_DIR}/index.json`, JSON.stringify(next, null, 1), `업로드 목록 갱신 (삭제 ${ids.length}건)`, indexSha);
+
+    state.index = next;
+    ids.forEach(id => delete state.snapCache[id]);
+    closeDeleteModal();
+    const viewingDeleted = state.snap && ids.includes(state.snap.id);
+    if (viewingDeleted || !state.snap) {
+      if (next.snapshots[0]) await showSnapshot(next.snapshots[0].id); else setSnapshot(null);
+    } else { renderSnapshotSelect(); renderDataBasis(); }
+    toast(`${ids.length}건을 삭제했습니다.`);
+  } catch (e) {
+    status.innerHTML = `<span class="text-red-600 font-semibold">${esc(e.message)}</span>`;
+  } finally { btn.disabled = false; }
+}
+
+/* ---------- 시작 ---------- */
+window.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (!document.getElementById('passwordModal').classList.contains('hidden')) resolvePassword(false);
+  else ['warehouseModal'].forEach(closeModal);
+});
+window.onload = async function () {
+  document.getElementById('velocityWindow').value = String(state.velocityWindow);
+  setGlobalUnit(state.unit);
+  tickClock(); setInterval(tickClock, 1000);
+  await loadIndex();
+  renderSnapshotSelect();
+  if (state.index.snapshots[0]) await showSnapshot(state.index.snapshots[0].id);
+  else setSnapshot(null);
+};
+</script>
+</body>
+</html>
