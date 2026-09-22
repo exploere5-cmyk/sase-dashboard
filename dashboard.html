@@ -1130,7 +1130,11 @@ function filteredProducts() {
   if (!state.view) return [];
   const q = document.getElementById('searchInput').value.trim().toLowerCase();
   const origin = document.getElementById('originFilter').value;
+  // 검색어가 품번과 정확히 같으면(끝의 '+' 무시) 그 품번만, 아니면 품번·품명 포함 검색
+  const qCode = Core.normCode(q);
+  const exact = q && state.view.products.some(p => p.code.toLowerCase() === qCode);
   return state.view.products.filter(p => {
+    if (exact && p.code.toLowerCase() !== qCode) return false;
     if (q && !(p.code.toLowerCase().includes(q) || p.raw.toLowerCase().includes(q) || p.name.toLowerCase().includes(q))) return false;
     if (origin === 'NONE') return !p.origin;
     if (origin !== 'ALL') return (p.origin || '').split('·').includes(origin);
