@@ -817,8 +817,14 @@ const Core = (() => {
       if (old && old.totalBox > 0 && cur.totalBox <= old.totalBox * (1 - CONFIG.DROP_ALERT_PCT / 100))
         add('warn', `${LABEL[k]}: 직전 업로드 대비 총 박스가 ${CONFIG.DROP_ALERT_PCT}% 이상 줄었습니다 (${old.totalBox.toLocaleString()} → ${cur.totalBox.toLocaleString()}). 조회 조건이 '전체'인지 확인하세요 (입고구분/출고구분/재고수량유무)`);
       if (cur.nonBox) add('info', `${LABEL[k]}: 재고단위가 BOX가 아닌 ${cur.nonBox}건은 수량 집계에서 제외했습니다`);
-      if (cur.from && cur.from !== snap.baseDate)
-        add('warn', `${LABEL[k]}: 수불기간 시작일(${cur.from})이 보고서 기준일(${snap.baseDate})과 다릅니다. 수불기간 시작일을 보고서 기준일로 맞춰주세요`);
+      // 파일에는 조회 기간이 없어 첫 거래일로 판단한다. 기준일이 주말·공휴일이면 첫 거래일이 늦는 게 정상이므로,
+      // 기준일과 첫 거래일 사이에 영업일이 빠져 있을 때만 경고한다.
+      if (cur.from) {
+        let firstBiz = snap.baseDate;
+        while (!isBizDay(firstBiz)) firstBiz = shiftISO(firstBiz, 1);
+        if (cur.from < snap.baseDate || cur.from > firstBiz)
+          add('warn', `${LABEL[k]}: 첫 거래일(${cur.from})이 보고서 기준일(${snap.baseDate}) 이후 첫 영업일(${firstBiz})과 다릅니다. 수불기간 시작일을 보고서 기준일로 맞춰 조회했는지 확인하세요`);
+      }
     }
     if (parsed.lot && parsed.lot.meta.zeroEnd === 0)
       add('warn', 'LOT재고현황: 기말재고가 0인 행이 한 건도 없습니다. 재고수량유무 = 전체로 조회했는지 확인하세요');
