@@ -103,6 +103,9 @@
         <select id="originFilter" onchange="renderAll()" class="py-1.5 px-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-saseRed text-slate-600">
           <option value="ALL">전체 원산지</option>
         </select>
+        <button onclick="resetView()" class="no-print py-1.5 px-2.5 text-xs bg-white hover:bg-slate-50 border border-slate-300 rounded-lg text-slate-600 font-semibold" title="상품 선택·검색어·원산지 필터를 처음 상태로" data-capture-ignore>
+          <i class="fa-solid fa-rotate-left"></i> 화면 초기화
+        </button>
         <label class="flex items-center gap-1.5 text-slate-500">
           소진속도 기준
           <select id="velocityWindow" onchange="onVelocityWindowChange()" class="py-1.5 px-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-saseRed text-slate-700">
@@ -174,9 +177,19 @@
 
       <!-- 상품 상세 패널 -->
       <section id="detailPanel" class="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col p-5 xl:sticky xl:top-24">
-        <div id="detailEmpty" class="text-xs text-slate-400 text-center py-10">
-          <i class="fa-solid fa-hand-pointer text-2xl text-slate-300 mb-2"></i>
-          <p>왼쪽 구역에서 상품을 클릭하세요.</p>
+        <div id="detailEmpty">
+          <div class="flex items-start justify-between border-b border-slate-200 pb-3 mb-4 gap-2">
+            <div>
+              <span class="text-xs font-black bg-slate-700 text-white px-2 py-0.5 rounded">전체 현황</span>
+              <h3 class="text-base font-extrabold text-slate-900 mt-1" id="overviewTitle">대상 품번 전체 합계</h3>
+              <p class="text-xs text-slate-400"><i class="fa-solid fa-hand-pointer"></i> 왼쪽 구역에서 상품을 클릭하면 그 상품의 상세가 표시됩니다.</p>
+            </div>
+            <button onclick="openWarehouseModal(null)" class="no-print shrink-0 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-2.5 py-1.5 rounded-lg border border-slate-300 flex items-center gap-1.5" data-capture-ignore>
+              <i class="fa-solid fa-warehouse text-saseRed"></i> 창고 현황
+            </button>
+          </div>
+          <div class="space-y-2.5" id="overviewBars"></div>
+          <div id="overviewForecast" class="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5 mt-4 text-xs"></div>
         </div>
         <div id="detailBody" class="hidden">
           <div class="flex items-start justify-between border-b border-slate-200 pb-3 mb-4 gap-2">
@@ -190,9 +203,14 @@
               <p id="detailSpec" class="text-xs text-slate-400"></p>
               <div id="detailFlags" class="flex flex-wrap gap-1 mt-1.5"></div>
             </div>
-            <button onclick="openWarehouseModalForSelected()" class="no-print shrink-0 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-2.5 py-1.5 rounded-lg border border-slate-300 flex items-center gap-1.5" data-capture-ignore>
-              <i class="fa-solid fa-warehouse text-saseRed"></i> 창고 현황
-            </button>
+            <div class="no-print shrink-0 flex flex-col items-end gap-1.5" data-capture-ignore>
+              <button onclick="clearSelection()" class="text-xs bg-white hover:bg-red-50 text-saseRed font-bold px-2.5 py-1.5 rounded-lg border border-saseRed/40 flex items-center gap-1.5" title="선택 해제 (Esc)">
+                <i class="fa-solid fa-xmark"></i> 선택 해제
+              </button>
+              <button onclick="openWarehouseModalForSelected()" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-2.5 py-1.5 rounded-lg border border-slate-300 flex items-center gap-1.5">
+                <i class="fa-solid fa-warehouse text-saseRed"></i> 창고 현황
+              </button>
+            </div>
           </div>
 
           <div class="space-y-3.5 mb-4">
@@ -1074,15 +1092,11 @@ async function showSnapshot(id) {
 function setSnapshot(snap) {
   state.snap = snap;
   state.view = snap ? Core.compute(snap, { velocityWindow: state.velocityWindow }) : null;
-  if (state.view && !state.view.products.some(p => p.code === state.selected)) state.selected = defaultSelection();
+  if (!state.view || !state.view.products.some(p => p.code === state.selected)) state.selected = null;
   buildOriginOptions();
   renderSnapshotSelect();
   renderDataBasis();
   renderAll();
-}
-function defaultSelection() {
-  const ps = state.view.products.slice().sort((a, b) => (b.st[5].box || 0) - (a.st[5].box || 0));
-  return ps.length ? ps[0].code : null;
 }
 function onSnapshotSelect() {
   const id = document.getElementById('snapshotSelect').value;
@@ -1211,15 +1225,58 @@ function renderColumns() {
   if (state.view) {
     const v = state.view;
     document.getElementById('stageFootnote').innerText =
-      `①②③ 화물은 주간 기준일(${v.B}) 기준 · ③은 이후 수입 입고분을 품번별로 차감 · ④⑤⑥은 수불기간 ${v.B} ~ ${v.T} · ⑦은 최근 ${v.N}영업일 소진속도 기준 (보유 ${v.bizCover.length}영업일). 상품을 클릭하면 오른쪽에 7단계 수량이 표시됩니다.`;
+      `①②③ 화물은 주간 기준일(${v.B}) 기준 · ③은 이후 수입 입고분을 품번별로 차감 · ④⑤⑥은 수불기간 ${v.B} ~ ${v.T} · ⑦은 최근 ${v.N}영업일 소진속도 기준 (보유 ${v.bizCover.length}영업일). 상품을 클릭하면 오른쪽에 7단계 수량이 표시되고, 한 번 더 클릭하거나 Esc를 누르면 전체 현황으로 돌아갑니다.`;
   }
 }
 
 /* ---------- 상품 상세 패널 ---------- */
+// 같은 상품을 다시 누르면 선택 해제 → 전체 현황으로 돌아간다
 function selectProduct(code) {
-  state.selected = code;
+  state.selected = state.selected === code ? null : code;
   renderColumns();
   renderDetail();
+}
+function clearSelection() {
+  state.selected = null;
+  renderColumns();
+  renderDetail();
+}
+function resetView() {
+  document.getElementById('searchInput').value = '';
+  document.getElementById('originFilter').value = 'ALL';
+  state.selected = null;
+  renderAll();
+}
+function renderOverview() {
+  const items = filteredProducts();
+  const filtered = state.view && items.length !== state.view.products.length;
+  document.getElementById('overviewTitle').innerText = filtered ? `검색·필터 결과 ${items.length}개 품번 합계` : `대상 품번 전체 합계 (${items.length}개)`;
+  const totals = STAGES.slice(0, 6).map(s => {
+    const vals = items.map(p => stageVal(p, s.k)).filter(v => v != null && v > 0);
+    return { s, n: vals.length, sum: vals.reduce((a, v) => a + v, 0) };
+  });
+  const max = Math.max(...totals.map(t => t.sum), 1e-9);
+  document.getElementById('overviewBars').innerHTML = totals.map(({ s, n, sum }) => `
+    <div class="space-y-1">
+      <div class="flex justify-between items-center text-xs">
+        <span class="font-bold text-slate-700">${s.k}. ${s.name}</span>
+        <span class="font-extrabold text-slate-900">${sum ? `${fmtNum(sum)} <span class="text-[10px] text-slate-400">${unitLabel()}</span>` : '<span class="text-slate-300">-</span>'}</span>
+      </div>
+      <div class="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden flex">
+        <div class="${s.color} h-2.5 rounded-full transition-all duration-500" style="width:${sum ? Math.max(1, Math.round(sum / max * 100)) : 0}%"></div>
+      </div>
+      <div class="text-[10px] text-slate-400">품번 ${n}개</div>
+    </div>`).join('');
+  const withV = items.filter(p => p.V > 0);
+  const urgent = withV.filter(p => p.urgent).length;
+  const caution = withV.filter(p => p.caution && !p.urgent).length;
+  document.getElementById('overviewForecast').innerHTML = `
+    <p class="font-bold text-amber-900 mb-2">7. 품절예측 <span class="font-normal text-[10px] text-amber-700">최근 ${state.view ? state.view.N : '-'}영업일 기준</span></p>
+    <div class="grid grid-cols-3 gap-2">
+      <div><span class="text-[10px] text-amber-700 block">출고 있는 품번</span><b class="text-slate-900">${withV.length}개</b></div>
+      <div><span class="text-[10px] text-amber-700 block">긴급 (D-${CONFIG.URGENT_DAYS} 이내)</span><b class="text-saseRed">${urgent}개</b></div>
+      <div><span class="text-[10px] text-amber-700 block">주의 (안전재고 미달)</span><b class="text-amber-700">${caution}개</b></div>
+    </div>`;
 }
 function riskInfo(p) {
   if (p.V == null) return { cls: 'bg-slate-100 text-slate-600', text: '출고 이력 없음' };
@@ -1233,7 +1290,11 @@ function renderDetail() {
   const empty = document.getElementById('detailEmpty');
   const body = document.getElementById('detailBody');
   const p = state.view && state.view.products.find(x => x.code === state.selected);
-  if (!p) { empty.classList.remove('hidden'); body.classList.add('hidden'); return; }
+  if (!p) {
+    empty.classList.toggle('hidden', !state.view); body.classList.add('hidden');
+    if (state.view) renderOverview();
+    return;
+  }
   empty.classList.add('hidden'); body.classList.remove('hidden');
   const v = state.view;
 
@@ -1764,8 +1825,10 @@ async function deleteSelectedSnapshots() {
 /* ---------- 시작 ---------- */
 window.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
-  if (!document.getElementById('passwordModal').classList.contains('hidden')) resolvePassword(false);
-  else ['warehouseModal'].forEach(closeModal);
+  const isOpen = id => !document.getElementById(id).classList.contains('hidden');
+  if (isOpen('passwordModal')) resolvePassword(false);
+  else if (isOpen('warehouseModal')) closeModal('warehouseModal');
+  else if (!['uploadModal', 'deleteModal'].some(isOpen) && state.selected) clearSelection();
 });
 window.onload = async function () {
   document.getElementById('velocityWindow').value = String(state.velocityWindow);
