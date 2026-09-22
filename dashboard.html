@@ -98,9 +98,9 @@
       <div class="flex flex-wrap items-center gap-2">
         <div class="relative">
           <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
-          <input type="text" id="searchInput" oninput="renderAll()" placeholder="품번 또는 품명 검색..." class="pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-saseRed w-48">
+          <input type="text" id="searchInput" oninput="onFilterChange()" placeholder="품번 또는 품명 검색..." class="pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-saseRed w-48">
         </div>
-        <select id="originFilter" onchange="renderAll()" class="py-1.5 px-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-saseRed text-slate-600">
+        <select id="originFilter" onchange="onFilterChange()" class="py-1.5 px-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-saseRed text-slate-600">
           <option value="ALL">전체 원산지</option>
         </select>
         <button onclick="resetView()" class="no-print py-1.5 px-2.5 text-xs bg-white hover:bg-slate-50 border border-slate-300 rounded-lg text-slate-600 font-semibold" title="상품 선택·검색어·원산지 필터를 처음 상태로" data-capture-ignore>
@@ -166,6 +166,7 @@
             <span>≈ 환산값</span>
           </div>
         </div>
+        <div id="searchNotice" class="hidden mb-3 bg-amber-50 border border-amber-300 text-amber-900 text-xs rounded-lg px-3 py-2"></div>
         <div id="stageScroller" class="overflow-x-auto custom-scroll pb-1">
           <div id="stageColumns" class="grid grid-cols-7 gap-2 min-w-[1190px]"></div>
         </div>
@@ -569,12 +570,14 @@ const Core = (() => {
     const h = rep.findIndex((r, i) => i >= 10 && r && str(r[0]) === '제품군' && str(r[2]) === '품번');
     if (h < 0) throw new Error('재고보고서의 품번 표 헤더(제품군/품번)를 찾지 못했습니다');
     const products = {};
+    const outOfScope = {};           // 국내생산 제품군 품번: 검색 시 "대상 아님" 안내용
     for (let i = h + 1; i < rep.length; i++) {
       const r = rep[i] || [];
       const group = str(r[0]);
-      if (!group || group.includes('요약') || CONFIG.DOMESTIC_GROUPS.includes(group)) continue;
+      if (!group || group.includes('요약')) continue;
       const code = normCode(r[2]);
       if (!code) continue;
+      if (CONFIG.DOMESTIC_GROUPS.includes(group)) { outOfScope[code] = [str(r[3]), group]; continue; }
       const p = products[code] || (products[code] = { raw: str(r[2]), name: str(r[3]), spec: str(r[4]), group, channel: str(r[5]), g: 0, h: 0, j: 0 });
       p.g += toNum(r[6]) || 0; p.h += toNum(r[7]) || 0; p.j += toNum(r[9]) || 0;
     }
@@ -618,7 +621,7 @@ const Core = (() => {
     for (const p of Object.values(products)) { p.g = round(p.g); p.h = round(p.h); p.j = round(p.j); }
 
     return {
-      data: { baseDate, rep: products, ship },
+      data: { baseDate, rep: products, ship, outOfScope },
       meta: {
         baseDate, rows: Object.keys(products).length,
         stages: Object.fromEntries(Object.entries(stat).map(([k, v]) => [k, { n: v.n, t: round(v.t, 1) }]))
@@ -1157,7 +1160,8 @@ function setColOption(k, key, val) {
 function renderColumns() {
   const wrap = document.getElementById('stageColumns');
   const items = filteredProducts();
-  document.getElementById('productCountBadge').innerText = state.view ? `(대상 ${items.length}개 품번${items.length !== state.view.products.length ? ` / 전체 ${state.view.products.length}개` : ''})` : '';
+  renderSearchNotice(items);
+  document.getElementById('productCountBadge').innerText = state.view ?`(대상 ${items.length}개 품번${items.length !== state.view.products.length ? ` / 전체 ${state.view.products.length}개` : ''})` : '';
 
   wrap.innerHTML = STAGES.map(stage => {
     const k = stage.k;
@@ -1240,6 +1244,37 @@ function clearSelection() {
   state.selected = null;
   renderColumns();
   renderDetail();
+}
+// 검색·필터가 바뀌면: 결과가 1개이거나 품번이 정확히 일치하면 자동 선택, 선택 상품이 결과에서 빠지면 해제
+function onFilterChange() {
+  const items = filteredProducts();
+  const q = document.getElementById('searchInput').value.trim().toLowerCase();
+  const exact = q && items.find(p => p.code.toLowerCase() === q || p.raw.toLowerCase() === q);
+  if (exact) state.selected = exact.code;
+  else if (q && items.length === 1) state.selected = items[0].code;
+  else if (state.selected && !items.some(p => p.code === state.selected)) state.selected = null;
+  renderAll();
+}
+// 검색 결과가 없을 때 이유 안내 (국내생산 등 대상 범위 밖 품번인지)
+function renderSearchNotice(items) {
+  const box = document.getElementById('searchNotice');
+  const raw = document.getElementById('searchInput').value.trim();
+  if (!state.view || items.length || !raw) { box.classList.add('hidden'); return; }
+  const q = raw.toLowerCase();
+  const snap = state.snap;
+  const oos = Object.entries(snap.weekly.outOfScope || {}).filter(([c, [name]]) => c.toLowerCase().includes(q) || name.toLowerCase().includes(q));
+  let msg;
+  if (oos.length) {
+    msg = `<b>'${esc(raw)}'</b>은(는) 현황판 대상이 아닙니다. 재고보고서의 국내생산 제품군 품번이라 기획서 기준(해외 수입/생산 상품만)에서 제외됩니다: ` +
+      oos.slice(0, 5).map(([c, [name, g]]) => `${esc(c)} (${esc(g)} · ${esc(name)})`).join(', ') + (oos.length > 5 ? ` 외 ${oos.length - 5}개` : '');
+  } else if (Object.keys(snap.lot || {}).some(c => c.toLowerCase().includes(q))) {
+    msg = `<b>'${esc(raw)}'</b>은(는) 창고 재고에는 있지만 현황판 대상(재고보고서 해외 제품군) 품번이 아닙니다. 국내생산 등 대상 범위 밖 품번일 수 있습니다.`;
+  } else {
+    msg = `<b>'${esc(raw)}'</b>와(과) 일치하는 품번·품명이 없습니다.`;
+  }
+  if (document.getElementById('originFilter').value !== 'ALL') msg += ' (원산지 필터도 적용 중입니다)';
+  box.innerHTML = `<i class="fa-solid fa-circle-info"></i> ${msg}`;
+  box.classList.remove('hidden');
 }
 function resetView() {
   document.getElementById('searchInput').value = '';
