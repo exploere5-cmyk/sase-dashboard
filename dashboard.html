@@ -1193,8 +1193,11 @@ function renderColumns() {
 
   // 동기화 보기: ⑤ 보관 값으로 줄 세운 품번 목록을 만들고, 모든 컬럼이 같은 줄에 같은 품번을 표시한다.
   // 재고 0도 포함해야 '적은순'에서 품절 위험 품번이 맨 위에 보인다.
-  const syncOrder = state.sync
-    ? items.filter(p => stageVal(p, 5) != null)
+  // ①~⑥ 어느 단계에도 물량이 없는 품번은 단종·미운영으로 보고 동기화 보기에서 뺀다
+  const isActive = p => [1, 2, 3, 4, 5, 6].some(s => (p.st[s].box || 0) > 0 || (p.st[s].ton || 0) > 0);
+  const syncBase = state.sync ? items.filter(p => stageVal(p, 5) != null && isActive(p)) : null;
+  const syncOrder = syncBase
+    ? [...syncBase]
       .sort((a, b) => state.syncSort === 'asc' ? stageVal(a, 5) - stageVal(b, 5) : stageVal(b, 5) - stageVal(a, 5))
       .slice(0, state.cols[5].top)
     : null;
@@ -1213,7 +1216,10 @@ function renderColumns() {
       valid.sort((a, b) => cfg.sort === 'asc' ? a.v - b.v : b.v - a.v);
       shown = valid.slice(0, cfg.top);
     }
-    const max = Math.max(...shown.map(x => x.v || 0), 1e-9);
+    // 막대 기준: 동기화 보기는 컬럼 전체 최대값(줄 세운 품번만 보면 아주 작은 값이 가득 찬 막대로 보임)
+    const max = syncOrder
+      ? Math.max(...valid.map(x => x.v), 1e-9)
+      : Math.max(...shown.map(x => x.v || 0), 1e-9);
 
     const sortOpts = k === 7
       ? [['asc', '적은순'], ['desc', '많은순']]
@@ -1232,6 +1238,8 @@ function renderColumns() {
         valueHtml = '<span class="text-slate-300">-</span>';
       } else if (soldOut) {
         valueHtml = `<span class="text-saseRed">${fmtNum(0)}</span>`;
+      } else if (k !== 7 && v > 0 && fmtNum(v) === fmtNum(0)) {
+        valueHtml = `<span class="text-slate-400">&lt;${state.unit === 'TON' ? '0.1' : '1'}</span>`;   // 반올림하면 0이 되는 소량
       } else if (k === 7) {
         valueHtml = `D-${Math.floor(v).toLocaleString()}`;
         barColor = p.urgent ? 'bg-saseRed' : p.caution ? 'bg-amber-400' : 'bg-emerald-500';
@@ -1287,7 +1295,8 @@ function renderColumns() {
   if (state.view) {
     const v = state.view;
     const syncNote = state.sync
-      ? `⑤ 보관 ${state.syncSort === 'asc' ? '적은순' : '많은순'} 기준 상위 ${state.cols[5].top}개 품번을 모든 컬럼이 같은 줄에 표시합니다 (해당 단계 데이터가 없으면 '-'). `
+      ? `⑤ 보관 ${state.syncSort === 'asc' ? '적은순' : '많은순'} 기준 상위 ${state.cols[5].top}개 품번을 모든 컬럼이 같은 줄에 표시합니다 (해당 단계 물량이 없으면 '-'). ` +
+        `①~⑥ 전 단계 물량이 0인 품번(단종·미운영 추정)은 제외 · 대상 ${syncBase.length}개 품번. `
       : '';
     document.getElementById('stageFootnote').innerText =
       `${syncNote}①②③ 화물은 주간 기준일(${v.B}) 기준 · ③은 이후 수입 입고분을 품번별로 차감 · ④⑤⑥은 수불기간 ${v.B} ~ ${v.T} · ⑦은 최근 ${v.N}영업일 소진속도 기준 (보유 ${v.bizCover.length}영업일). 상품을 클릭하면 오른쪽에 7단계 수량이 표시되고, 한 번 더 클릭하거나 Esc를 누르면 전체 현황으로 돌아갑니다.`;
