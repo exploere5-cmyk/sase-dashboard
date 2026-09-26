@@ -46,10 +46,11 @@
       #mainContent { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
       #mainGrid { flex: 1 1 auto; min-height: 0; }
       #stageSection, #summaryPanel { min-height: 0; }
+      #tableView { flex: 1 1 auto; min-height: 0; }
       #stageScroller { flex: 1 1 auto; min-height: 0; max-height: none; }
     }
     body.capturing #appHeader, body.capturing #siteFooter { position: static !important; }
-    body.capturing #stageScroller { overflow: visible !important; max-height: none !important; }
+    body.capturing #stageScroller, body.capturing #tableScroller { overflow: visible !important; max-height: none !important; }
     html.capturing, body.capturing, html.capturing body { height: auto !important; overflow: visible !important; }
     html.capturing #mainContent, html.capturing #mainGrid, html.capturing #stageSection { display: block; min-height: 0; }
     body.capturing .stage-head { position: static !important; }
@@ -62,8 +63,8 @@
       #appHeader { position: static !important; box-shadow: none !important; }
       #siteFooter { position: static !important; border-top: 1px solid #E2E8F0; }
       html, body { height: auto !important; overflow: visible !important; }
-      #stageScroller { overflow: visible !important; max-height: none !important; }
-      #mainContent, #mainGrid, #stageSection { display: block !important; min-height: 0 !important; }
+      #stageScroller, #tableScroller { overflow: visible !important; max-height: none !important; }
+      #mainContent, #mainGrid, #stageSection, #tableView { display: block !important; min-height: 0 !important; }
       .stage-head { position: static !important; }
       #stageColumns { min-width: 0 !important; }
       #mainGrid { grid-template-columns: minmax(0, 1fr) 340px !important; }
@@ -171,6 +172,16 @@
       <p id="emptyStateDetail" class="mt-1 text-xs">관리자가 [데이터 업로드]로 엑셀을 올리면 이 화면에 표시됩니다.</p>
     </div>
 
+    <!-- 화면 탭 -->
+    <div class="flex items-center gap-1 bg-slate-100 border border-slate-200 rounded-xl p-1 w-fit text-xs" data-capture-ignore>
+      <button type="button" id="tabKanbanBtn" onclick="setMainView('kanban')" class="px-3 py-1.5 rounded-lg transition-all bg-white text-saseRed shadow-sm font-bold">
+        <i class="fa-solid fa-route"></i> 7단계 현황
+      </button>
+      <button type="button" id="tabTableBtn" onclick="setMainView('table')" class="px-3 py-1.5 rounded-lg transition-all text-slate-500 hover:text-slate-900 font-semibold">
+        <i class="fa-solid fa-table-list"></i> 전체 요약
+      </button>
+    </div>
+
     <!-- 본문: ①~⑦ 구역 (상품을 클릭하면 상세는 모달로) -->
     <div id="mainGrid" class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_260px] gap-2 items-stretch">
 
@@ -210,6 +221,9 @@
       <aside id="summaryPanel" class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 min-w-0 flex flex-col gap-2.5 overflow-y-auto custom-scroll"></aside>
 
     </div>
+
+    <!-- 전체 요약 (탭) -->
+    <section id="tableView" class="hidden bg-white rounded-xl shadow-sm border border-slate-200 min-w-0 flex flex-col overflow-hidden"></section>
   </main>
 
   <footer id="siteFooter" class="fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur border-t border-slate-200 text-xs text-slate-600">
@@ -1145,6 +1159,10 @@ const state = {
   sync: store.get('sync', false),          // ⑤ 보관 기준 동기화 보기 여부
   syncSort: store.get('syncSort', 'asc'),  // 동기화 보기 정렬 (기본: 적은순 = 재고 없는 상품부터)
   riskFilter: store.get('riskFilter', 'all'),    // ⑦ 품절예측 상태 필터 (all · urgent · caution)
+  mainView: store.get('mainView', 'kanban'),     // 화면 탭: kanban · table
+  tableActiveOnly: store.get('tableActiveOnly', true),   // 전체 요약: 단종·미운영 제외
+  tableSort: store.get('tableSort', null) || { key: 'risk', dir: 'asc' },
+  tableCard: null,                               // 요약 카드로 건 필터
   velocityWindow: store.get('velocityWindow', 20),
   index: { snapshots: [] },
   snapCache: {},
@@ -1797,6 +1815,8 @@ function renderAll() {
   document.getElementById('mainGrid').classList.toggle('hidden', !has);
   renderColumns();
   renderSummary();
+  renderTable();
+  renderMainTabs();
   if (isProductModalOpen()) { renderDetail(); renderDeepDive(); }
 }
 
@@ -2117,6 +2137,188 @@ function openWarehouseModal(code) {
       }
     }
   });
+}
+
+/* ---------- 전체 요약 뷰 (탭) ---------- */
+// 탭 전환: 칸반(7단계 현황) ⇄ 전체 요약 표
+function setMainView(v) {
+  state.mainView = v;
+  store.set('mainView', v);
+  renderMainTabs();
+  if (v === 'table') renderTable(); else { renderColumns(); renderSummary(); }
+}
+function renderMainTabs() {
+  const on = 'px-3 py-1.5 rounded-lg transition-all bg-white text-saseRed shadow-sm font-bold';
+  const off = 'px-3 py-1.5 rounded-lg transition-all text-slate-500 hover:text-slate-900 font-semibold';
+  const table = state.mainView === 'table';
+  document.getElementById('tabKanbanBtn').className = table ? off : on;
+  document.getElementById('tabTableBtn').className = table ? on : off;
+  document.getElementById('mainGrid').classList.toggle('hidden', table);
+  document.getElementById('tableView').classList.toggle('hidden', !table);
+}
+
+// ①~⑥ 어디에도 물량이 없는 품번 = 단종·미운영 추정
+function isIdleProduct(p) {
+  return ![1, 2, 3, 4, 5, 6].some(k => (p.st[k].box || 0) > 0 || (p.st[k].ton || 0) > 0);
+}
+function setTableScope(onlyActive) {
+  state.tableActiveOnly = !!onlyActive;
+  store.set('tableActiveOnly', state.tableActiveOnly);
+  renderTable();
+}
+function setTableCard(key) {
+  state.tableCard = state.tableCard === key ? null : key;
+  renderTable();
+}
+function setTableSort(key) {
+  if (state.tableSort.key === key) state.tableSort.dir = state.tableSort.dir === 'asc' ? 'desc' : 'asc';
+  else state.tableSort = { key, dir: ['code', 'name', 'eta', 'risk', 'd'].includes(key) ? 'asc' : 'desc' };   // 위험·소진일수·ETA 는 임박한 것이 먼저
+  store.set('tableSort', state.tableSort);
+  renderTable();
+}
+
+// 위험 순위: 낮을수록 먼저 확인해야 하는 품번
+function riskRank(p) {
+  if (p.urgent) return 0;                                       // 품절 긴급
+  if (p.arrival && p.arrival.shortBox > 0) return 1;            // 입항 전 재고 공백
+  if (p.caution && !p.arrival.next) return 2;                   // 안전재고 미달인데 일정 없음
+  if (p.caution) return 3;                                      // 안전재고 미달
+  if (p.arrival && !p.arrival.next && p.arrival.unknownN) return 4;   // 입항 일정 미확정
+  if (p.arrival && p.arrival.lateN) return 5;                   // 입항 예정일 경과
+  if (p.V > 0) return 6;
+  return 7;
+}
+function tableRowState(p) {
+  if (p.urgent) return ['품절 긴급', 'bg-red-100 text-red-700'];
+  if (p.arrival && p.arrival.shortBox > 0) return ['입항 전 공백', 'bg-red-50 text-red-700'];
+  if (p.caution) return ['안전재고 미달', 'bg-amber-100 text-amber-800'];
+  if (p.arrival && !p.arrival.next && p.arrival.unknownN) return ['입항 일정 미확정', 'bg-indigo-50 text-indigo-700'];
+  if (isIdleProduct(p)) return ['단종·미운영', 'bg-slate-100 text-slate-500'];
+  if (!(p.V > 0)) return ['출고 없음', 'bg-slate-100 text-slate-500'];
+  if (p.sampleShort) return ['참고', 'bg-slate-100 text-slate-600'];
+  return ['안정', 'bg-emerald-100 text-emerald-700'];
+}
+
+function renderTable() {
+  const wrap = document.getElementById('tableView');
+  if (!wrap || !state.view) return;
+  const u = unitLabel();
+  const all = filteredProducts();
+  const base = state.tableActiveOnly ? all.filter(p => !isIdleProduct(p)) : all;
+  const idleCount = all.length - all.filter(p => !isIdleProduct(p)).length;
+
+  // 요약 카드 (기획서 4.9)
+  const card = (key, label, fn, val, cls) => {
+    const hit = base.filter(fn);
+    const tot = hit.reduce((a, p) => a + (val(p) || 0), 0);
+    const on = state.tableCard === key;
+    return { key, label, n: hit.length, tot, cls, on };
+  };
+  const cards = [
+    card('prod', '생산중', p => (stageVal(p, 1) || 0) > 0, p => stageVal(p, 1), 'text-slate-600'),
+    card('ship', '해상 이동중', p => (stageVal(p, 2) || 0) > 0, p => stageVal(p, 2), 'text-blue-600'),
+    card('customs', '통관·검역중', p => (stageVal(p, 3) || 0) > 0, p => stageVal(p, 3), 'text-indigo-600'),
+    card('stock', '가용재고 보유', p => (stageVal(p, 5) || 0) > 0, p => stageVal(p, 5), 'text-saseRed'),
+    card('risk', '품절 임박', p => p.urgent || p.caution, p => stageVal(p, 5), 'text-amber-700')
+  ];
+  const cardHtml = cards.map(c => `<button type="button" onclick="setTableCard('${c.key}')" data-capture-ignore
+      class="text-left rounded-xl border px-3 py-2 transition-all ${c.on ? 'border-saseRed bg-red-50/60 ring-1 ring-saseRed' : 'border-slate-200 bg-white hover:bg-slate-50'}">
+      <div class="text-[11px] text-slate-500 truncate">${c.label}</div>
+      <div class="text-lg font-extrabold ${c.cls} tabular-nums leading-tight">${c.n}<span class="text-[11px] font-bold text-slate-400"> 품번</span></div>
+      <div class="text-[10px] text-slate-400 truncate">${c.key === 'risk' ? `긴급 ${base.filter(p => p.urgent).length} · 주의 ${base.filter(p => p.caution && !p.urgent).length}` : `${fmtNum(c.tot)} ${u}`}</div>
+    </button>`).join('');
+
+  let rows = base;
+  const cardFn = { prod: p => (stageVal(p, 1) || 0) > 0, ship: p => (stageVal(p, 2) || 0) > 0, customs: p => (stageVal(p, 3) || 0) > 0, stock: p => (stageVal(p, 5) || 0) > 0, risk: p => p.urgent || p.caution };
+  if (state.tableCard && cardFn[state.tableCard]) rows = rows.filter(cardFn[state.tableCard]);
+
+  // 정렬
+  const val = {
+    code: p => p.raw.toLowerCase(), name: p => (p.name || '').toLowerCase(),
+    stock: p => stageVal(p, 5) || 0, v: p => (p.V == null ? -1 : p.V), d: p => (p.D == null ? 1e9 : p.D),
+    eta: p => (p.arrival && p.arrival.next ? p.arrival.next : '9999'),
+    hold: p => (p.arrival && p.arrival.shortBox != null ? p.arrival.shortBox : -1),
+    risk: p => riskRank(p)
+  };
+  const { key, dir } = state.tableSort;
+  const f = val[key] || val.risk;
+  rows = [...rows].sort((a, b) => {
+    const x = f(a), y = f(b);
+    const c = typeof x === 'string' ? x.localeCompare(y) : x - y;
+    return dir === 'asc' ? c : -c;
+  });
+
+  const arrow = k => state.tableSort.key === k ? (state.tableSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  const th = (k, label, cls = 'text-right') => `<th class="${cls} font-semibold px-2 py-1.5 cursor-pointer hover:text-saseRed whitespace-nowrap" onclick="setTableSort('${k}')">${label}${arrow(k)}</th>`;
+
+  const body = rows.map(p => {
+    const [stLabel, stCls] = tableRowState(p);
+    const a = p.arrival || {};
+    const bonded = stageVal(p, 3) || 0;
+    let etaTxt, etaCls;
+    if (a.next) { etaTxt = `${fmtMD(a.next)} · ${fmtArrival(a.nextTon, a.nextBox)}${u}`; etaCls = 'text-blue-700 font-semibold'; }
+    else if (bonded > 0) { etaTxt = `통관·검역 ${fmtNum(bonded)}${u}`; etaCls = 'text-indigo-600'; }
+    else if (a.unknownN) { etaTxt = `미확정 ${fmtArrival(a.unknownTon, a.unknownBox)}${u}`; etaCls = 'text-amber-700'; }
+    else { etaTxt = '-'; etaCls = 'text-slate-300'; }
+    let holdTxt, holdCls;
+    if (!a.next) { holdTxt = '-'; holdCls = 'text-slate-300'; }
+    else if (!(p.V > 0)) { holdTxt = '판정 보류'; holdCls = 'text-slate-400'; }
+    else if (a.shortBox > 0) { holdTxt = `${fmtBoxIn(p, a.shortBox)}${u} 부족`; holdCls = 'text-saseRed font-bold'; }
+    else { holdTxt = '여유'; holdCls = 'text-emerald-600'; }
+    return `<tr class="border-t border-slate-100 hover:bg-red-50/40 cursor-pointer" data-code="${esc(p.code)}" onclick="selectProduct(this.dataset.code)">
+      <td class="px-2 py-1.5 font-bold text-slate-900 whitespace-nowrap">${esc(p.raw)}</td>
+      <td class="px-2 py-1.5 text-slate-500 max-w-[260px] truncate" title="${esc(p.name)}">${esc(p.name)}</td>
+      <td class="px-2 py-1.5 text-slate-400 whitespace-nowrap">${esc(p.origin || '-')}</td>
+      <td class="px-2 py-1.5 text-right tabular-nums font-bold text-slate-900">${fmtStage(p, 5, false)}</td>
+      <td class="px-2 py-1.5 text-right tabular-nums text-slate-600">${p.V == null ? '-' : fmtBoxIn(p, p.V)}</td>
+      <td class="px-2 py-1.5 text-right tabular-nums ${p.urgent ? 'text-saseRed font-bold' : 'text-slate-600'}">${p.D == null ? '-' : `D-${Math.floor(p.D)}`}</td>
+      <td class="px-2 py-1.5 text-right tabular-nums ${etaCls} whitespace-nowrap">${etaTxt}</td>
+      <td class="px-2 py-1.5 text-right tabular-nums ${holdCls} whitespace-nowrap">${holdTxt}</td>
+      <td class="px-2 py-1.5 text-right"><span class="text-[10px] font-bold px-1.5 py-0.5 rounded ${stCls} whitespace-nowrap">${stLabel}</span></td>
+    </tr>`;
+  }).join('');
+
+  wrap.innerHTML = `
+    <div class="p-3 border-b border-slate-200 space-y-2">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h2 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+          <i class="fa-solid fa-table-list text-saseRed"></i> 전체 요약
+          <span class="text-xs font-normal text-slate-500">${rows.length}개 품번${state.tableCard ? ' (카드 선택됨)' : ''}</span>
+        </h2>
+        <div class="flex items-center gap-2 text-[11px]" data-capture-ignore>
+          <div class="bg-slate-100 p-0.5 rounded-lg border border-slate-200 flex items-center font-semibold">
+            <button type="button" onclick="setTableScope(true)" class="px-2.5 py-1 rounded-md ${state.tableActiveOnly ? 'bg-white text-saseRed shadow-sm' : 'text-slate-500 hover:text-slate-900'}">운영 품번만</button>
+            <button type="button" onclick="setTableScope(false)" class="px-2.5 py-1 rounded-md ${state.tableActiveOnly ? 'text-slate-500 hover:text-slate-900' : 'bg-white text-saseRed shadow-sm'}">전체 (단종 ${idleCount} 포함)</button>
+          </div>
+          ${state.tableCard ? `<button onclick="setTableCard('${state.tableCard}')" class="px-2 py-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-600 font-semibold">카드 필터 해제</button>` : ''}
+        </div>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">${cardHtml}</div>
+    </div>
+    <div id="tableScroller" class="overflow-auto custom-scroll flex-1 min-h-0">
+      <table class="w-full text-[11px]">
+        <thead class="sticky top-0 z-10 bg-slate-50 text-slate-500 shadow-sm">
+          <tr>
+            ${th('code', '품번', 'text-left')}
+            ${th('name', '품명', 'text-left')}
+            <th class="text-left font-semibold px-2 py-1.5 whitespace-nowrap">원산지</th>
+            ${th('stock', `현재고(${u})`)}
+            ${th('v', `일평균 소진(${u})`)}
+            ${th('d', '예상 소진')}
+            ${th('eta', '다음 입항(ETA)')}
+            ${th('hold', '입항까지 버팀')}
+            ${th('risk', '상태')}
+          </tr>
+        </thead>
+        <tbody>${body || '<tr><td colspan="9" class="text-center text-slate-400 py-8">해당 품번이 없습니다.</td></tr>'}</tbody>
+      </table>
+    </div>
+    <p class="px-3 py-2 text-[10px] text-slate-400 border-t border-slate-200 leading-tight">
+      품번을 클릭하면 상세(7단계 · 소비기한 · 창고)가 열립니다 · 열 제목을 누르면 정렬 ·
+      '운영 품번만'은 ①~⑥ 어디에도 물량이 없는 단종·미운영 추정 품번을 제외한 것입니다 ·
+      다음 입항은 원본 ETA(입항 예정)이며 창고 입고일이 아닙니다 ·
+      소진속도 표본 ${state.view.bizCover.length}영업일${state.view.bizCover.length < state.view.N ? ' (예상 소진일수는 참고값)' : ''}
+    </p>`;
 }
 
 /* ---------- 저장 확인 창 (인쇄 · 이미지 · PDF · 엑셀) ---------- */
@@ -2656,6 +2858,7 @@ window.addEventListener('keydown', e => {
 window.onload = async function () {
   document.getElementById('velocityWindow').value = String(state.velocityWindow);
   setGlobalUnit(state.unit);
+  renderMainTabs();
   renderViewModeToggle();
   renderDenseToggle();
   renderSummaryToggle();
