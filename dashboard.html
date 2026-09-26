@@ -36,8 +36,12 @@
     .custom-scroll::-webkit-scrollbar-track { background: #EDF2F7; }
     .custom-scroll::-webkit-scrollbar-thumb { background: #CBD5E0; border-radius: 3px; }
     .stage-item { transition: background-color .15s, box-shadow .15s; }
+    /* 7단계 구역: 컬럼 머리말은 고정하고 목록만 세로로 스크롤 (인쇄·이미지·PDF에서는 아래에서 해제) */
+    #stageScroller { max-height: max(360px, calc(100vh - 230px)); overflow-y: auto; }
+    .stage-head { position: sticky; top: 0; z-index: 5; }
     body.capturing #appHeader, body.capturing #siteFooter, body.capturing #detailPanel { position: static !important; }
-    body.capturing #stageScroller { overflow: visible !important; }
+    body.capturing #stageScroller { overflow: visible !important; max-height: none !important; }
+    body.capturing .stage-head { position: static !important; }
     body.capturing #siteFooter { backdrop-filter: none; }
     @media print {
       @page { size: A3 landscape; margin: 8mm; }
@@ -45,7 +49,8 @@
       .no-print, .modal { display: none !important; }
       #appHeader { position: static !important; box-shadow: none !important; }
       #siteFooter { position: static !important; border-top: 1px solid #E2E8F0; }
-      #stageScroller { overflow: visible !important; }
+      #stageScroller { overflow: visible !important; max-height: none !important; }
+      .stage-head { position: static !important; }
       #stageColumns { min-width: 0 !important; }
       #mainGrid { grid-template-columns: minmax(0, 1fr) 340px !important; }
       #detailPanel { position: static !important; }
@@ -1276,8 +1281,10 @@ function renderColumns() {
         ${sortOpts.map(([v, l]) => `<option value="${v}" ${curSort === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
     const numColor = k === 7 ? 'bg-saseOrange' : 'bg-saseRed';
     const colBorder = k === 5 ? 'border-2 border-saseRed bg-red-50/40' : k === 7 ? 'border border-saseOrange bg-amber-50/40' : 'border border-slate-200 bg-slate-50/60';
+    // 머리말은 고정되어 목록이 그 아래로 지나가므로, 컬럼 배경과 같은 불투명 색을 깔아준다
+    const headBg = k === 5 ? '#FFF9F9' : k === 7 ? '#FFFDF7' : '#FBFCFD';
     return `<div class="stage-col rounded-xl ${colBorder} flex flex-col min-w-0">
-      <div class="p-2.5 border-b border-slate-200/80 space-y-1.5">
+      <div class="stage-head p-2.5 border-b border-slate-200/80 space-y-1.5 rounded-t-xl" style="background:${headBg}">
         <div class="flex items-center justify-between gap-1">
           <div class="flex items-center gap-1.5 min-w-0">
             <span class="w-5 h-5 shrink-0 rounded-full ${numColor} text-white text-[11px] font-extrabold flex items-center justify-center">${k}</span>
