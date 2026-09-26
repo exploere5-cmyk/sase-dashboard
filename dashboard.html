@@ -283,6 +283,7 @@
     </div>
     <div class="p-5 overflow-y-auto custom-scroll flex-1 space-y-4">
       <div id="deepTiles" class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2"></div>
+      <p id="deepBonded" class="hidden text-[11px] text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5"></p>
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         <div id="detailBody" class="border border-slate-200 rounded-xl p-3.5">
@@ -1190,6 +1191,8 @@ function arrivalLine(p) {
   const a = p.arrival || {};
   const u = unitLabel();
   if (a.next) return { text: `입고 ${fmtMD(a.next)} · ${fmtArrival(a.nextTon, a.nextBox)}${u}`, cls: 'text-blue-600' };
+  const bonded = stageVal(p, 3);
+  if (bonded > 0) return { text: `통관·검역 ${fmtNum(bonded)}${u} · 입고일 미확정`, cls: 'text-indigo-600' };
   if (a.unknownN) return { text: `입항 일정 미확정 ${fmtArrival(a.unknownTon, a.unknownBox)}${u}`, cls: 'text-amber-600' };
   if (a.lateN) return { text: `입항 예정일 경과 ${a.lateN}건`, cls: 'text-amber-600' };
   return { text: '', cls: '' };
@@ -1847,12 +1850,17 @@ function renderDeepDive() {
   const pipeline = [1, 2, 3, 4].reduce((a, k) => a + (p.st[k].box || 0), 0);
   const coverAll = p.V > 0 ? (p.st[5].box + pipeline) / p.V : null;
   const a = p.arrival || {};
+  const bondedBox = p.st[3].box || 0;          // ③ 통관·검역 단계 잔량 (이미 국내 반입)
   const shortSub = p.sampleShort ? ` · 참고값(표본 ${p.sampleDays}영업일)` : '';
   let arrVal, arrSub, arrCls;
   if (a.next) {
     arrVal = fmtMD(a.next);
     arrSub = `${fmtArrival(a.nextTon, a.nextBox)}${u} · 원본 ETA(입항 예정)${a.bizDays != null ? ` · ${a.bizDays}영업일 뒤` : ''}`;
     arrCls = 'text-blue-600';
+  } else if (bondedBox > 0) {
+    arrVal = '통관 중';
+    arrSub = `통관·검역 단계 잔량 ${fmtBoxIn(p, bondedBox)}${u} · 창고 입고일 미확정${a.unknownN ? ` · 입항 미확정 ${fmtArrival(a.unknownTon, a.unknownBox)}${u}` : ''}`;
+    arrCls = 'text-indigo-600';
   } else if (a.unknownN) {
     arrVal = '미확정';
     arrSub = `입항 일정 미확정 ${fmtArrival(a.unknownTon, a.unknownBox)}${u} (${a.unknownN}건)`;
@@ -1978,6 +1986,12 @@ function renderDeepDive() {
       </div>${body}</div>`;
 
   document.getElementById('deepTiles').innerHTML = tiles;
+  const bondedEl = document.getElementById('deepBonded');
+  bondedEl.classList.toggle('hidden', !(bondedBox > 0));
+  if (bondedBox > 0) {
+    bondedEl.innerHTML = `<i class="fa-solid fa-ship"></i> <b>통관·검역 단계 잔량 ${fmtBoxIn(p, bondedBox)}${u}</b> · 창고 입고일 미확정`
+      + ` <span class="text-indigo-500">(이미 국내 반입된 보충 물량 · 검역 완료 후 ⑤ 보관으로 넘어갑니다)</span>`;
+  }
   document.getElementById('deepExpiry').innerHTML =
     box('소비기한별 보관 재고', 'fa-calendar-check', expHtml, `<span class="text-[10px] text-slate-400">${p.exp == null ? '' : `${rows.length}개 기한${p.expUnknown ? ' + 미상' : ''}`}</span>`);
   document.getElementById('deepWh').innerHTML =
