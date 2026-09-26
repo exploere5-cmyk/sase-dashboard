@@ -39,11 +39,21 @@
     /* 7단계 구역: 컬럼 머리말은 고정하고 목록만 세로로 스크롤 (인쇄·이미지·PDF에서는 아래에서 해제) */
     #stageScroller { max-height: max(360px, calc(100vh - 230px)); overflow-y: auto; }
     .stage-head { position: sticky; top: 0; z-index: 5; }
-    #deepScroller { max-height: max(360px, calc(100vh - 260px)); overflow-y: auto; }
-    body.capturing #appHeader, body.capturing #siteFooter, body.capturing #detailPanel { position: static !important; }
+    /* 넓은 화면: 페이지 전체 스크롤을 없애고 ①~⑦ 컬럼 목록 안에서만 스크롤 */
+    @media (min-width: 1024px) {
+      html, body { height: 100%; overflow: hidden; }
+      #captureRoot { height: 100%; min-height: 0; }
+      #mainContent { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+      #mainGrid { flex: 1 1 auto; min-height: 0; }
+      #stageSection { flex: 1 1 auto; min-height: 0; }
+      #stageScroller { flex: 1 1 auto; min-height: 0; max-height: none; }
+    }
+    body.capturing #appHeader, body.capturing #siteFooter { position: static !important; }
     body.capturing #stageScroller { overflow: visible !important; max-height: none !important; }
-    body.capturing #deepScroller { overflow: visible !important; max-height: none !important; }
+    html.capturing, body.capturing, html.capturing body { height: auto !important; overflow: visible !important; }
+    html.capturing #mainContent, html.capturing #mainGrid, html.capturing #stageSection { display: block; min-height: 0; }
     body.capturing .stage-head { position: static !important; }
+    @media print { .stage-head { position: static !important; } }
     body.capturing #siteFooter { backdrop-filter: none; }
     @media print {
       @page { size: A3 landscape; margin: 8mm; }
@@ -51,8 +61,9 @@
       .no-print, .modal { display: none !important; }
       #appHeader { position: static !important; box-shadow: none !important; }
       #siteFooter { position: static !important; border-top: 1px solid #E2E8F0; }
+      html, body { height: auto !important; overflow: visible !important; }
       #stageScroller { overflow: visible !important; max-height: none !important; }
-      #deepScroller { overflow: visible !important; max-height: none !important; }
+      #mainContent, #mainGrid, #stageSection { display: block !important; min-height: 0 !important; }
       .stage-head { position: static !important; }
       #stageColumns { min-width: 0 !important; }
       #mainGrid { grid-template-columns: minmax(0, 1fr) 340px !important; }
@@ -99,14 +110,14 @@
     </div>
   </header>
 
-  <main class="flex-1 max-w-[1800px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 space-y-4">
+  <main id="mainContent" class="flex-1 max-w-[1800px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 space-y-4">
 
     <!-- 도구 모음: 검색 · 이력 · 단위 · 출력 · 관리 -->
     <section class="bg-white rounded-xl shadow-sm border border-slate-200 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
       <div class="flex flex-wrap items-center gap-2">
         <div class="relative">
           <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
-          <input type="text" id="searchInput" oninput="onFilterChange()" placeholder="품번 또는 품명 검색..." class="pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-saseRed w-48">
+          <input type="text" id="searchInput" oninput="onFilterChange()" onkeydown="if (event.key === 'Enter') openProductModal()" placeholder="품번 또는 품명 검색(Enter=상세)..." class="pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-saseRed w-48">
         </div>
         <select id="originFilter" onchange="onFilterChange()" class="py-1.5 px-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-saseRed text-slate-600">
           <option value="ALL">전체 원산지</option>
@@ -160,10 +171,10 @@
       <p id="emptyStateDetail" class="mt-1 text-xs">관리자가 [데이터 업로드]로 엑셀을 올리면 이 화면에 표시됩니다.</p>
     </div>
 
-    <!-- 본문: 7단계 구역 + 상품 상세 패널 -->
-    <div id="mainGrid" class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px] gap-4 items-start">
+    <!-- 본문: ①~⑦ 구역 (상품을 클릭하면 상세는 모달로) -->
+    <div id="mainGrid" class="flex flex-col">
 
-      <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 min-w-0">
+      <section id="stageSection" class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 min-w-0 flex flex-col">
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
           <h2 class="text-sm font-bold text-slate-800 flex items-center gap-2">
             <i class="fa-solid fa-route text-saseRed"></i> 해외 수입 7단계 상품별 현황
@@ -180,82 +191,61 @@
           </div>
         </div>
         <div id="searchNotice" class="hidden mb-3 bg-amber-50 border border-amber-300 text-amber-900 text-xs rounded-lg px-3 py-2"></div>
-        <div id="stageScroller" class="overflow-x-auto custom-scroll pb-1">
-          <div id="stageColumns" class="grid grid-cols-7 gap-2 min-w-[1190px]"></div>
+        <div id="stageScroller" class="overflow-x-auto custom-scroll pb-1 flex flex-col">
+          <div id="stageColumns" class="grid grid-cols-7 gap-2 min-w-[1190px] flex-1"></div>
         </div>
         <p class="text-[11px] text-slate-400 mt-3 flex items-center gap-1.5">
           <i class="fa-solid fa-circle-info"></i>
-          <span id="stageFootnote">상품을 클릭하면 오른쪽에서 해당 상품의 7단계 수량이 표시됩니다.</span>
+          <span id="stageFootnote">상품을 클릭하면 그 상품의 상세 화면이 한 장으로 열립니다.</span>
         </p>
       </section>
 
-      <!-- 선택 상품 심층 분석: 7단계 구역 아래 빈 공간 -->
-      <section id="deepSection" class="hidden xl:col-start-1 bg-white rounded-xl shadow-sm border border-slate-200 min-w-0 flex flex-col overflow-hidden">
-        <div class="px-4 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
-          <h2 class="text-sm font-bold text-slate-800 flex items-center gap-2 min-w-0">
-            <i class="fa-solid fa-chart-simple text-saseRed"></i> 선택 상품 심층 분석
-            <span id="deepSubject" class="text-xs font-normal text-slate-500 truncate"></span>
-          </h2>
-          <div class="flex items-center gap-2 no-print" data-capture-ignore>
-            <button onclick="clearSelection()" class="text-xs bg-white hover:bg-red-50 text-saseRed font-bold px-2.5 py-1.5 rounded-lg border border-saseRed/40 flex items-center gap-1.5" title="선택 해제 (Esc)">
-              <i class="fa-solid fa-xmark"></i> 선택 해제
-            </button>
-          </div>
+    </div>
+  </main>
+
+  <footer id="siteFooter" class="fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur border-t border-slate-200 text-xs text-slate-600">
+    <div class="max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 h-10 flex items-center justify-between gap-3">
+      <span class="font-semibold">기획: 안솔 책임 (물류부문 B2C물류팀)</span>
+      <span class="text-[11px] text-slate-400 hidden sm:inline">SASE 상품별 통합 현황판 · 계산 기준: 기획서_260921</span>
+    </div>
+  </footer>
+</div>
+
+<!-- 모달: 상품 상세 (핵심 지표 · 7단계 · 소비기한 · 창고) -->
+<div id="productModal" class="modal fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-center justify-center p-3 sm:p-4" onclick="if (event.target === this) closeProductModal()">
+  <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-[1400px] max-h-[94vh] flex flex-col overflow-hidden">
+    <div class="px-5 py-3.5 border-b border-slate-200 bg-slate-50 flex items-start justify-between gap-3">
+      <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-1.5">
+          <span id="detailBadgeCode" class="text-xs font-black bg-saseRed text-white px-2 py-0.5 rounded"></span>
+          <span id="detailBadgeOrigin" class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded border border-slate-200"></span>
+          <span id="detailRiskBadge" class="text-xs font-bold px-2 py-0.5 rounded"></span>
+          <div id="detailFlags" class="flex flex-wrap gap-1"></div>
         </div>
-        <div id="deepScroller" class="custom-scroll p-4">
-          <div id="deepBody" class="space-y-3"></div>
-        </div>
-      </section>
+        <h3 id="detailProductName" class="text-base font-extrabold text-slate-900 mt-1 break-keep"></h3>
+        <p id="detailSpec" class="text-xs text-slate-400"></p>
+      </div>
+      <div class="shrink-0 flex items-center gap-2 no-print" data-capture-ignore>
+        <button onclick="openWarehouseModalForSelected()" class="text-xs bg-white hover:bg-slate-100 text-slate-700 font-semibold px-2.5 py-1.5 rounded-lg border border-slate-300 flex items-center gap-1.5">
+          <i class="fa-solid fa-warehouse text-saseRed"></i> 창고별 재고
+        </button>
+        <button onclick="closeProductModal()" class="w-8 h-8 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-600 flex items-center justify-center" title="닫기 (Esc)">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+    </div>
+    <div class="p-5 overflow-y-auto custom-scroll flex-1 space-y-4">
+      <div id="deepTiles" class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2"></div>
 
-      <!-- 상품 상세 패널 -->
-      <section id="detailPanel" class="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col p-5 xl:sticky xl:top-24">
-        <div id="detailEmpty">
-          <div class="flex items-start justify-between border-b border-slate-200 pb-3 mb-4 gap-2">
-            <div>
-              <span class="text-xs font-black bg-slate-700 text-white px-2 py-0.5 rounded">전체 현황</span>
-              <h3 class="text-base font-extrabold text-slate-900 mt-1" id="overviewTitle">대상 품번 전체 합계</h3>
-              <p class="text-xs text-slate-400"><i class="fa-solid fa-hand-pointer"></i> 왼쪽 구역에서 상품을 클릭하면 그 상품의 상세가 표시됩니다.</p>
-            </div>
-            <button onclick="openWarehouseModal(null)" class="no-print shrink-0 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-2.5 py-1.5 rounded-lg border border-slate-300 flex items-center gap-1.5" data-capture-ignore>
-              <i class="fa-solid fa-warehouse text-saseRed"></i> 창고 현황
-            </button>
-          </div>
-          <div class="space-y-2.5" id="overviewBars"></div>
-          <div id="overviewForecast" class="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5 mt-4 text-xs"></div>
-        </div>
-        <div id="detailBody" class="hidden">
-          <div class="flex items-start justify-between border-b border-slate-200 pb-3 mb-4 gap-2">
-            <div class="min-w-0">
-              <div class="flex flex-wrap items-center gap-1.5">
-                <span id="detailBadgeCode" class="text-xs font-black bg-saseRed text-white px-2 py-0.5 rounded"></span>
-                <span id="detailBadgeOrigin" class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded border border-slate-200"></span>
-                <span id="detailRiskBadge" class="text-xs font-bold px-2 py-0.5 rounded"></span>
-              </div>
-              <h3 id="detailProductName" class="text-base font-extrabold text-slate-900 mt-1 break-keep"></h3>
-              <p id="detailSpec" class="text-xs text-slate-400"></p>
-              <div id="detailFlags" class="flex flex-wrap gap-1 mt-1.5"></div>
-            </div>
-            <div class="no-print shrink-0 flex flex-col items-end gap-1.5" data-capture-ignore>
-              <button onclick="clearSelection()" class="text-xs bg-white hover:bg-red-50 text-saseRed font-bold px-2.5 py-1.5 rounded-lg border border-saseRed/40 flex items-center gap-1.5" title="선택 해제 (Esc)">
-                <i class="fa-solid fa-xmark"></i> 선택 해제
-              </button>
-              <button onclick="openWarehouseModalForSelected()" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-2.5 py-1.5 rounded-lg border border-slate-300 flex items-center gap-1.5">
-                <i class="fa-solid fa-warehouse text-saseRed"></i> 창고 현황
-              </button>
-            </div>
-          </div>
-
-          <div class="space-y-3.5 mb-4">
-            <h4 class="text-xs font-bold text-slate-700 flex items-center justify-between">
-              <span>7단계 수량</span>
-              <span class="text-[11px] text-slate-400" id="detailPipelineTotal"></span>
-            </h4>
-            <div class="space-y-2.5" id="detailPipelineBars"></div>
-          </div>
-
-          <div id="detailForecast" class="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5 mb-4 text-xs"></div>
-
-          <div class="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+        <div id="detailBody" class="border border-slate-200 rounded-xl p-3.5">
+          <h4 class="text-xs font-bold text-slate-800 flex items-center justify-between mb-2.5">
+            <span class="flex items-center gap-1.5"><i class="fa-solid fa-route text-saseRed"></i> 7단계 수량</span>
+            <span class="text-[11px] font-normal text-slate-400" id="detailPipelineTotal"></span>
+          </h4>
+          <div class="space-y-2.5" id="detailPipelineBars"></div>
+          <div id="detailForecast" class="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5 mt-3 text-xs"></div>
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-3.5 mt-3">
             <div class="flex items-center justify-between mb-2">
               <span class="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                 <i class="fa-solid fa-building text-saseRed"></i> <span id="miniWarehouseTitle">주요 보관 창고</span>
@@ -266,16 +256,12 @@
           </div>
           <p id="detailNote" class="text-[10px] text-slate-400 mt-3"></p>
         </div>
-      </section>
-    </div>
-  </main>
+        <div id="deepWh"></div>
+      </div>
 
-  <footer id="siteFooter" class="fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur border-t border-slate-200 text-xs text-slate-600">
-    <div class="max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 h-10 flex items-center justify-between gap-3">
-      <span class="font-semibold">기획: 안솔 책임 (물류부문 B2C물류팀)</span>
-      <span class="text-[11px] text-slate-400 hidden sm:inline">SASE 상품별 통합 현황판 · 계산 기준: 기획서_260921</span>
+      <div id="deepExpiry"></div>
     </div>
-  </footer>
+  </div>
 </div>
 
 <!-- 모달: 창고별 재고 -->
@@ -1385,18 +1371,31 @@ async function copyCode(code) {
   }
   toast(`<i class="fa-solid fa-check text-emerald-400"></i> <b>${esc(code)}</b> 복사됨`, 1500);
 }
-// 같은 상품을 다시 누르면 선택 해제 → 전체 현황으로 돌아간다
+// 상품을 누르면 그 상품의 상세가 모달 한 장으로 열린다
 function selectProduct(code) {
-  state.selected = state.selected === code ? null : code;
+  state.selected = code;
   renderColumns();
+  openProductModal();
+}
+function openProductModal() {
+  if (!state.view || !state.selected) return;
+  if (!state.view.products.some(x => x.code === state.selected)) return;
   renderDetail();
   renderDeepDive();
+  openModal('productModal');
 }
+function closeProductModal() {
+  closeModal('productModal');
+  destroyDeepCharts();
+}
+// 선택 해제: 모달을 닫고 컬럼의 강조 표시도 지운다
 function clearSelection() {
   state.selected = null;
+  closeProductModal();
   renderColumns();
-  renderDetail();
-  renderDeepDive();
+}
+function isProductModalOpen() {
+  return !document.getElementById('productModal').classList.contains('hidden');
 }
 // 검색·필터가 바뀌면: 결과가 1개이거나 품번이 정확히 일치하면 자동 선택, 선택 상품이 결과에서 빠지면 해제
 function onFilterChange() {
@@ -1435,37 +1434,6 @@ function resetView() {
   state.selected = null;
   renderAll();
 }
-function renderOverview() {
-  const items = filteredProducts();
-  const filtered = state.view && items.length !== state.view.products.length;
-  document.getElementById('overviewTitle').innerText = filtered ? `검색·필터 결과 ${items.length}개 품번 합계` : `대상 품번 전체 합계 (${items.length}개)`;
-  const totals = STAGES.slice(0, 6).map(s => {
-    const vals = items.map(p => stageVal(p, s.k)).filter(v => v != null && v > 0);
-    return { s, n: vals.length, sum: vals.reduce((a, v) => a + v, 0) };
-  });
-  const max = Math.max(...totals.map(t => t.sum), 1e-9);
-  document.getElementById('overviewBars').innerHTML = totals.map(({ s, n, sum }) => `
-    <div class="space-y-1">
-      <div class="flex justify-between items-center text-xs">
-        <span class="font-bold text-slate-700">${s.k}. ${s.name}</span>
-        <span class="font-extrabold text-slate-900">${sum ? `${fmtNum(sum)} <span class="text-[10px] text-slate-400">${unitLabel()}</span>` : '<span class="text-slate-300">-</span>'}</span>
-      </div>
-      <div class="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden flex">
-        <div class="${s.color} h-2.5 rounded-full transition-all duration-500" style="width:${sum ? Math.max(1, Math.round(sum / max * 100)) : 0}%"></div>
-      </div>
-      <div class="text-[10px] text-slate-400">품번 ${n}개</div>
-    </div>`).join('');
-  const withV = items.filter(p => p.V > 0);
-  const urgent = withV.filter(p => p.urgent).length;
-  const caution = withV.filter(p => p.caution && !p.urgent).length;
-  document.getElementById('overviewForecast').innerHTML = `
-    <p class="font-bold text-amber-900 mb-2">7. 품절예측 <span class="font-normal text-[10px] text-amber-700">최근 ${state.view ? state.view.N : '-'}영업일 기준</span></p>
-    <div class="grid grid-cols-3 gap-2">
-      <div><span class="text-[10px] text-amber-700 block">출고 있는 품번</span><b class="text-slate-900">${withV.length}개</b></div>
-      <div><span class="text-[10px] text-amber-700 block">긴급 (D-${CONFIG.URGENT_DAYS} 이내)</span><b class="text-saseRed">${urgent}개</b></div>
-      <div><span class="text-[10px] text-amber-700 block">주의 (안전재고 미달)</span><b class="text-amber-700">${caution}개</b></div>
-    </div>`;
-}
 function riskInfo(p) {
   if (p.V == null) return { cls: 'bg-slate-100 text-slate-600', text: '출고 이력 없음' };
   if (p.noSales) return { cls: 'bg-slate-100 text-slate-600', text: '출고 없음' };
@@ -1475,15 +1443,8 @@ function riskInfo(p) {
   return { cls: 'bg-emerald-100 text-emerald-800', text: `재고 안정 (${d})` };
 }
 function renderDetail() {
-  const empty = document.getElementById('detailEmpty');
-  const body = document.getElementById('detailBody');
   const p = state.view && state.view.products.find(x => x.code === state.selected);
-  if (!p) {
-    empty.classList.toggle('hidden', !state.view); body.classList.add('hidden');
-    if (state.view) renderOverview();
-    return;
-  }
-  empty.classList.add('hidden'); body.classList.remove('hidden');
+  if (!p) return;
   const v = state.view;
 
   document.getElementById('detailBadgeCode').innerText = p.raw;
@@ -1576,8 +1537,7 @@ function renderAll() {
   document.getElementById('emptyState').classList.toggle('hidden', has);
   document.getElementById('mainGrid').classList.toggle('hidden', !has);
   renderColumns();
-  renderDetail();
-  renderDeepDive();
+  if (isProductModalOpen()) { renderDetail(); renderDeepDive(); }
 }
 
 /* ---------- 선택 상품 심층 분석 (소비기한별 재고 · 창고 · 핵심 지표) ---------- */
@@ -1622,12 +1582,9 @@ function expiryVerdict(p, r) {
 }
 
 function renderDeepDive() {
-  const sec = document.getElementById('deepSection');
   const p = state.view && state.selected ? state.view.products.find(x => x.code === state.selected) : null;
   destroyDeepCharts();
-  if (!p) { sec.classList.add('hidden'); return; }
-  sec.classList.remove('hidden');
-  document.getElementById('deepSubject').innerText = `${p.raw} · ${p.name}`;
+  if (!p) return;
 
   const T = state.view.T, u = unitLabel();
   const pipeline = [1, 2, 3, 4].reduce((a, k) => a + (p.st[k].box || 0), 0);
@@ -1737,11 +1694,11 @@ function renderDeepDive() {
         ${extra}
       </div>${body}</div>`;
 
-  document.getElementById('deepBody').innerHTML = `
-    <div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">${tiles}</div>
-    ${box('소비기한별 보관 재고', 'fa-calendar-check', expHtml, `<span class="text-[10px] text-slate-400">${p.exp == null ? '' : `${rows.length}개 기한${p.expUnknown ? ' + 미상' : ''}`}</span>`)}
-    ${box('창고별 보관', 'fa-building', whHtml, `<button onclick="openWarehouseModalForSelected()" class="no-print text-[11px] text-saseRed hover:underline font-bold" data-capture-ignore>창고 전체보기 ▸</button>`)}
-  `;
+  document.getElementById('deepTiles').innerHTML = tiles;
+  document.getElementById('deepExpiry').innerHTML =
+    box('소비기한별 보관 재고', 'fa-calendar-check', expHtml, `<span class="text-[10px] text-slate-400">${p.exp == null ? '' : `${rows.length}개 기한${p.expUnknown ? ' + 미상' : ''}`}</span>`);
+  document.getElementById('deepWh').innerHTML =
+    box('창고별 보관', 'fa-building', whHtml, `<button onclick="openWarehouseModalForSelected()" class="no-print text-[11px] text-saseRed hover:underline font-bold" data-capture-ignore>창고 전체보기 ▸</button>`);
 
   // 차트 (막대 = 현재 단위, 소비기한은 월별로 묶어 쌓기)
   if (p.exp && (rows.length || p.expUnknown)) {
@@ -1879,6 +1836,7 @@ async function captureCanvas() {
   const scroller = document.getElementById('stageScroller');
   const width = Math.max(root.scrollWidth, root.scrollWidth + scroller.scrollWidth - scroller.clientWidth);
   document.body.classList.add('capturing');
+  document.documentElement.classList.add('capturing');
   root.style.width = `${width}px`;
   try {
     return await htmlToImage.toCanvas(root, {
@@ -1888,6 +1846,7 @@ async function captureCanvas() {
   } finally {
     root.style.width = '';
     document.body.classList.remove('capturing');
+    document.documentElement.classList.remove('capturing');
     document.getElementById('toast').classList.add('hidden');
   }
 }
@@ -2307,6 +2266,7 @@ window.addEventListener('keydown', e => {
   const isOpen = id => !document.getElementById(id).classList.contains('hidden');
   if (isOpen('passwordModal')) resolvePassword(false);
   else if (isOpen('warehouseModal')) closeModal('warehouseModal');
+  else if (isOpen('productModal')) closeProductModal();
   else if (!['uploadModal', 'deleteModal'].some(isOpen) && state.selected) clearSelection();
 });
 window.onload = async function () {
