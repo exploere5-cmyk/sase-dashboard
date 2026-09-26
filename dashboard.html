@@ -187,7 +187,7 @@
             </div>
             <div class="bg-slate-100 p-0.5 rounded-lg border border-slate-200 flex items-center font-semibold" data-capture-ignore>
               <button type="button" id="denseOffBtn" onclick="setDense(false)" class="px-2.5 py-1 rounded-md transition-all bg-white text-saseRed shadow-sm" title="품번·품명·막대를 모두 표시">보통</button>
-              <button type="button" id="denseOnBtn" onclick="setDense(true)" class="px-2.5 py-1 rounded-md transition-all text-slate-500 hover:text-slate-900" title="한 줄로 줄여 두 배 많이 보기">춘춘히</button>
+              <button type="button" id="denseOnBtn" onclick="setDense(true)" class="px-2.5 py-1 rounded-md transition-all text-slate-500 hover:text-slate-900" title="한 줄로 줄여 두 배 많이 보기">촘촘히</button>
             </div>
             <span class="hidden 2xl:flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-saseRed"></span> ①~⑥ 수량 (<span class="currentUnitLabel">톤</span>)</span>
             <span class="hidden 2xl:flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-saseOrange"></span> ⑦ 예상 소진 영업일</span>
@@ -1047,7 +1047,7 @@ const store = {
 const state = {
   unit: store.get('unit', 'TON'),
   cols: store.get('cols', null) || Object.fromEntries(STAGES.map(s => [s.k, { top: 10, sort: s.k === 7 ? 'asc' : 'desc' }])),
-  dense: store.get('dense', false),        // 목록 밀도: true = 한 줄로 춘춘히
+  dense: store.get('dense', false),        // 목록 밀도: true = 한 줄로 촘촘히
   sync: store.get('sync', false),          // ⑤ 보관 기준 동기화 보기 여부
   syncSort: store.get('syncSort', 'asc'),  // 동기화 보기 정렬 (기본: 적은순 = 재고 없는 상품부터)
   velocityWindow: store.get('velocityWindow', 20),
@@ -1374,7 +1374,7 @@ function renderColumns() {
         `①~⑥ 전 단계 물량이 0인 품번(단종·미운영 추정)은 제외 · 대상 ${syncBase.length}개 품번. `
       : '';
     document.getElementById('stageFootnote').innerText =
-      `${syncNote}①②③ 화물은 주간 기준일(${v.B}) 기준 · ③은 이후 수입 입고분을 품번별로 차감 · ④⑤⑥은 수불기간 ${v.B} ~ ${v.T} · ⑦은 최근 ${v.N}영업일 소진속도 기준 (보유 ${v.bizCover.length}영업일). 상품을 클릭하면 오른쪽에 7단계 수량이 표시되고, 한 번 더 클릭하거나 Esc를 누르면 전체 현황으로 돌아갑니다.`;
+      `${syncNote}①②③ 화물은 주간 기준일(${v.B}) 기준 · ③은 이후 수입 입고분을 품번별로 차감 · ④⑤⑥은 수불기간 ${v.B} ~ ${v.T} · ⑦은 최근 ${v.N}영업일 소진속도 기준 (보유 ${v.bizCover.length}영업일). 상품을 클릭하면 그 상품의 상세(7단계 · 소비기한 · 창고)가 한 장으로 열리고, Esc나 바깥 여백을 누르면 닫힙니다.`;
   }
 }
 
