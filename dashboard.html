@@ -45,7 +45,7 @@
       #captureRoot { height: 100%; min-height: 0; }
       #mainContent { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
       #mainGrid { flex: 1 1 auto; min-height: 0; }
-      #stageSection { flex: 1 1 auto; min-height: 0; }
+      #stageSection, #summaryPanel { min-height: 0; }
       #stageScroller { flex: 1 1 auto; min-height: 0; max-height: none; }
     }
     body.capturing #appHeader, body.capturing #siteFooter { position: static !important; }
@@ -77,7 +77,7 @@
 
   <!-- 상단 헤더 -->
   <header id="appHeader" class="bg-white border-b border-slate-200 lg:sticky lg:top-0 z-40 shadow-sm">
-    <div class="max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex flex-wrap items-center justify-between gap-3">
+    <div class="max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 py-1.5 flex flex-wrap items-center justify-between gap-2">
       <div class="flex items-center space-x-4">
         <div class="flex items-center space-x-2">
           <span class="bg-saseRed text-white font-black px-2.5 py-1 rounded text-lg tracking-wider">SASE</span>
@@ -110,10 +110,10 @@
     </div>
   </header>
 
-  <main id="mainContent" class="flex-1 max-w-[1800px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 space-y-4">
+  <main id="mainContent" class="flex-1 max-w-[1800px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-2.5 space-y-2.5">
 
     <!-- 도구 모음: 검색 · 이력 · 단위 · 출력 · 관리 -->
-    <section class="bg-white rounded-xl shadow-sm border border-slate-200 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+    <section class="bg-white rounded-xl shadow-sm border border-slate-200 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
       <div class="flex flex-wrap items-center gap-2">
         <div class="relative">
           <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
@@ -172,10 +172,10 @@
     </div>
 
     <!-- 본문: ①~⑦ 구역 (상품을 클릭하면 상세는 모달로) -->
-    <div id="mainGrid" class="flex flex-col">
+    <div id="mainGrid" class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_290px] gap-2.5 items-stretch">
 
-      <section id="stageSection" class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 min-w-0 flex flex-col">
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+      <section id="stageSection" class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 min-w-0 flex flex-col">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
           <h2 class="text-sm font-bold text-slate-800 flex items-center gap-2">
             <i class="fa-solid fa-route text-saseRed"></i> 해외 수입 7단계 상품별 현황
             <span class="text-xs font-normal text-slate-500" id="productCountBadge"></span>
@@ -185,20 +185,26 @@
               <button type="button" id="viewModeIndivBtn" onclick="setSyncMode(false)" class="px-2.5 py-1 rounded-md transition-all bg-white text-saseRed shadow-sm">개별 정렬 보기</button>
               <button type="button" id="viewModeSyncBtn" onclick="setSyncMode(true)" class="px-2.5 py-1 rounded-md transition-all text-slate-500 hover:text-slate-900">⑤ 보관 기준 동기화 보기</button>
             </div>
-            <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-saseRed"></span> ①~⑥ 수량 (<span class="currentUnitLabel">톤</span>)</span>
-            <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-saseOrange"></span> ⑦ 예상 소진 영업일</span>
-            <span>≈ 환산값</span>
+            <div class="bg-slate-100 p-0.5 rounded-lg border border-slate-200 flex items-center font-semibold" data-capture-ignore>
+              <button type="button" id="denseOffBtn" onclick="setDense(false)" class="px-2.5 py-1 rounded-md transition-all bg-white text-saseRed shadow-sm" title="품번·품명·막대를 모두 표시">보통</button>
+              <button type="button" id="denseOnBtn" onclick="setDense(true)" class="px-2.5 py-1 rounded-md transition-all text-slate-500 hover:text-slate-900" title="한 줄로 줄여 두 배 많이 보기">초춘히</button>
+            </div>
+            <span class="hidden 2xl:flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-saseRed"></span> ①~⑥ 수량 (<span class="currentUnitLabel">톤</span>)</span>
+            <span class="hidden 2xl:flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-saseOrange"></span> ⑦ 예상 소진 영업일</span>
           </div>
         </div>
         <div id="searchNotice" class="hidden mb-3 bg-amber-50 border border-amber-300 text-amber-900 text-xs rounded-lg px-3 py-2"></div>
         <div id="stageScroller" class="overflow-x-auto custom-scroll pb-1 flex flex-col">
           <div id="stageColumns" class="grid grid-cols-7 gap-2 min-w-[1190px] flex-1"></div>
         </div>
-        <p class="text-[11px] text-slate-400 mt-3 flex items-center gap-1.5">
+        <p class="text-[10px] text-slate-400 mt-2 flex items-center gap-1.5 leading-tight">
           <i class="fa-solid fa-circle-info"></i>
           <span id="stageFootnote">상품을 클릭하면 그 상품의 상세 화면이 한 장으로 열립니다.</span>
         </p>
       </section>
+
+      <!-- 오른쪽 요약: 스크롤 없이 한 화면에 -->
+      <aside id="summaryPanel" class="bg-white rounded-xl shadow-sm border border-slate-200 p-3 min-w-0 flex flex-col gap-2.5 overflow-y-auto custom-scroll"></aside>
 
     </div>
   </main>
@@ -1041,6 +1047,7 @@ const store = {
 const state = {
   unit: store.get('unit', 'TON'),
   cols: store.get('cols', null) || Object.fromEntries(STAGES.map(s => [s.k, { top: 10, sort: s.k === 7 ? 'asc' : 'desc' }])),
+  dense: store.get('dense', false),        // 목록 밀도: true = 한 줄로 초춘히
   sync: store.get('sync', false),          // ⑤ 보관 기준 동기화 보기 여부
   syncSort: store.get('syncSort', 'asc'),  // 동기화 보기 정렬 (기본: 적은순 = 재고 없는 상품부터)
   velocityWindow: store.get('velocityWindow', 20),
@@ -1233,6 +1240,18 @@ function setSyncMode(on) {
   renderViewModeToggle();
   renderColumns();
 }
+function setDense(on) {
+  state.dense = !!on;
+  store.set('dense', state.dense);
+  renderDenseToggle();
+  renderColumns();
+}
+function renderDenseToggle() {
+  const on = 'px-2.5 py-1 rounded-md transition-all bg-white text-saseRed shadow-sm';
+  const off = 'px-2.5 py-1 rounded-md transition-all text-slate-500 hover:text-slate-900';
+  document.getElementById('denseOffBtn').className = state.dense ? off : on;
+  document.getElementById('denseOnBtn').className = state.dense ? on : off;
+}
 function renderViewModeToggle() {
   const on = 'px-2.5 py-1 rounded-md transition-all bg-white text-saseRed shadow-sm';
   const off = 'px-2.5 py-1 rounded-md transition-all text-slate-500 hover:text-slate-900';
@@ -1278,9 +1297,9 @@ function renderColumns() {
     const sortOpts = k === 7
       ? [['asc', '적은순'], ['desc', '많은순']]
       : [['desc', '많은순'], ['asc', '적은순']];
-    const head = k === 7
-      ? `출고 있는 품번 ${valid.length}개 · <b class="text-saseRed">긴급 ${valid.filter(x => x.p.urgent).length}</b> · <b class="text-amber-600">주의 ${valid.filter(x => x.p.caution && !x.p.urgent).length}</b>`
-      : `품번 ${valid.length}개 · <b class="text-slate-800">${fmtNum(total)}${unitLabel()}</b>${nullCount ? ` <span class="text-slate-400">(환산불가 ${nullCount})</span>` : ''}`;
+    const colHead = k === 7
+      ? `${valid.length}개 · <b class="text-saseRed">긴급 ${valid.filter(x => x.p.urgent).length}</b> · <b class="text-amber-600">주의 ${valid.filter(x => x.p.caution && !x.p.urgent).length}</b>`
+      : `${valid.length}개 · <b class="text-slate-800">${fmtNum(total)}${unitLabel()}</b>${nullCount ? ` <span class="text-slate-400">(환산불가 ${nullCount})</span>` : ''}`;
 
     const list = shown.length ? shown.map(({ p, v }) => {
       const sel = p.code === state.selected;
@@ -1305,16 +1324,19 @@ function renderColumns() {
         : p.registered === false ? '<span class="ml-1 text-[9px] font-bold bg-slate-200 text-slate-600 px-1 rounded">미등록</span>' : '';
       const pct = empty || (v <= 0 && k !== 7) ? 0 : Math.max(2, Math.round(v / max * 100));
       const barHtml = pct ? `<div class="${barColor} h-1.5 rounded-full" style="width:${pct}%"></div>` : '';
-      return `<div role="button" tabindex="0" data-code="${esc(p.code)}" onclick="selectProduct(this.dataset.code)" onkeydown="if(event.key==='Enter')selectProduct(this.dataset.code)" class="stage-item group cursor-pointer w-full text-left rounded-lg px-2 py-1.5 ${sel ? 'bg-red-50 ring-1 ring-saseRed' : 'hover:bg-red-50/50'}">
-        <div class="flex items-center justify-between gap-1 text-[11px]">
+      const head = `<div class="flex items-center justify-between gap-1 text-[11px]">
           <span class="flex items-center gap-1 min-w-0">
             <span class="font-bold ${empty ? 'text-slate-400' : 'text-slate-900'} truncate">${esc(p.raw)}${tag}</span>
             <button type="button" data-copy="${esc(p.raw)}" onclick="event.stopPropagation(); copyCode(this.dataset.copy)" class="shrink-0 text-slate-300 group-hover:text-slate-500 hover:!text-saseRed" title="품번 복사" data-capture-ignore><i class="fa-regular fa-copy"></i></button>
           </span>
           <span class="font-extrabold ${empty ? 'text-slate-300' : 'text-slate-800'} whitespace-nowrap tabular-nums">${valueHtml}</span>
-        </div>
-        <div class="text-[10px] text-slate-400 truncate">${esc(p.name)}</div>
-        <div class="mt-1 w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">${barHtml}</div>
+        </div>`;
+      const body = state.dense
+        ? `<div class="mt-0.5 w-full bg-slate-100 rounded-full h-1 overflow-hidden">${barHtml}</div>`
+        : `<div class="text-[10px] text-slate-400 truncate">${esc(p.name)}</div>
+        <div class="mt-1 w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">${barHtml}</div>`;
+      return `<div role="button" tabindex="0" data-code="${esc(p.code)}" onclick="selectProduct(this.dataset.code)" onkeydown="if(event.key==='Enter')selectProduct(this.dataset.code)" title="${esc(p.raw)} · ${esc(p.name)}" class="stage-item group cursor-pointer w-full text-left rounded-lg px-2 ${state.dense ? 'py-1' : 'py-1.5'} ${sel ? 'bg-red-50 ring-1 ring-saseRed' : 'hover:bg-red-50/50'}">
+        ${head}${body}
       </div>`;
     }).join('') : '<div class="text-[11px] text-slate-400 text-center py-6">해당 상품 없음</div>';
 
@@ -1333,18 +1355,15 @@ function renderColumns() {
     // 머리말은 고정되어 목록이 그 아래로 지나가므로, 컬럼 배경과 같은 불투명 색을 깔아준다
     const headBg = k === 5 ? '#FFF9F9' : k === 7 ? '#FFFDF7' : '#FBFCFD';
     return `<div class="stage-col rounded-xl ${colBorder} flex flex-col min-w-0">
-      <div class="stage-head p-2.5 border-b border-slate-200/80 space-y-1.5 rounded-t-xl" style="background:${headBg}">
-        <div class="flex items-center justify-between gap-1">
-          <div class="flex items-center gap-1.5 min-w-0">
-            <span class="w-5 h-5 shrink-0 rounded-full ${numColor} text-white text-[11px] font-extrabold flex items-center justify-center">${k}</span>
-            <span class="text-xs font-bold text-slate-800 truncate">${stage.name}</span>
-          </div>
-          <span class="text-[10px] text-slate-400 truncate">${stage.sub}</span>
+      <div class="stage-head px-2 py-1.5 border-b border-slate-200/80 space-y-1 rounded-t-xl" style="background:${headBg}">
+        <div class="flex items-center gap-1.5 min-w-0" title="${esc(stage.sub)}">
+          <span class="w-5 h-5 shrink-0 rounded-full ${numColor} text-white text-[11px] font-extrabold flex items-center justify-center">${k}</span>
+          <span class="text-xs font-bold text-slate-800 truncate">${stage.name}</span>
+          <span class="ml-auto text-[10px] text-slate-500 truncate text-right">${state.view ? colHead : '-'}</span>
         </div>
-        <div class="text-[11px] text-slate-500 leading-snug">${state.view ? head : '-'}</div>
         <div class="flex gap-1">${topSel}${sortSel}</div>
       </div>
-      <div class="p-1.5 space-y-1">${state.view ? list : ''}</div>
+      <div class="p-1.5 ${state.dense ? 'space-y-0.5' : 'space-y-1'}">${state.view ? list : ''}</div>
     </div>`;
   }).join('');
 
@@ -1357,6 +1376,127 @@ function renderColumns() {
     document.getElementById('stageFootnote').innerText =
       `${syncNote}①②③ 화물은 주간 기준일(${v.B}) 기준 · ③은 이후 수입 입고분을 품번별로 차감 · ④⑤⑥은 수불기간 ${v.B} ~ ${v.T} · ⑦은 최근 ${v.N}영업일 소진속도 기준 (보유 ${v.bizCover.length}영업일). 상품을 클릭하면 오른쪽에 7단계 수량이 표시되고, 한 번 더 클릭하거나 Esc를 누르면 전체 현황으로 돌아갑니다.`;
   }
+}
+
+/* ---------- 오른쪽 요약 패널 (스크롤 없이 한 화면) ---------- */
+function renderSummary() {
+  const box = document.getElementById('summaryPanel');
+  if (!box) return;
+  if (!state.view) { box.innerHTML = ''; return; }
+  const items = filteredProducts();
+  const u = unitLabel();
+  const filtered = items.length !== state.view.products.length;
+
+  // ①~⑥ 단계별 합계
+  const totals = STAGES.slice(0, 6).map(s => {
+    const vals = items.map(p => stageVal(p, s.k)).filter(v => v != null && v > 0);
+    return { s, n: vals.length, sum: vals.reduce((a, v) => a + v, 0) };
+  });
+  const max = Math.max(...totals.map(t => t.sum), 1e-9);
+  const bars = totals.map(({ s, n, sum }) => `
+    <div class="flex items-center gap-1.5">
+      <span class="w-4 h-4 shrink-0 rounded-full ${s.k === 5 ? 'bg-saseRed' : 'bg-slate-300'} text-white text-[9px] font-extrabold flex items-center justify-center">${s.k}</span>
+      <div class="min-w-0 flex-1">
+        <div class="flex items-baseline justify-between gap-1">
+          <span class="text-[10px] text-slate-500 truncate">${s.name}</span>
+          <span class="text-[11px] font-extrabold text-slate-800 tabular-nums whitespace-nowrap">${sum ? fmtNum(sum) : '-'}</span>
+        </div>
+        <div class="w-full bg-slate-100 rounded-full h-1 overflow-hidden"><div class="${s.color} h-1 rounded-full" style="width:${sum ? Math.max(2, Math.round(sum / max * 100)) : 0}%"></div></div>
+      </div>
+      <span class="text-[9px] text-slate-400 w-8 text-right shrink-0">${n}개</span>
+    </div>`).join('');
+
+  // ⑦ 품절예측
+  const withV = items.filter(p => p.V > 0);
+  const urgent = withV.filter(p => p.urgent).length;
+  const caution = withV.filter(p => p.caution && !p.urgent).length;
+
+  // 소비기한 (LOT No. 가 있는 자료에서만)
+  const T = state.view.T;
+  const daysLeft = d => Math.round((new Date(d + 'T00:00:00') - new Date(T + 'T00:00:00')) / 86400000);
+  let hasExp = false, expiredCodes = 0;
+  items.forEach(p => {
+    if (!p.exp) return;
+    hasExp = true;
+    if (p.exp.some(({ d, box: b }) => b > 0 && daysLeft(d) <= 0)) expiredCodes++;
+  });
+  // 수량은 품번별 박스당 중량으로 환산해 현재 단위로 합산한다
+  const expIn = which => {
+    let out = 0;
+    items.forEach(p => {
+      if (!p.exp) return;
+      p.exp.forEach(({ d, box: b }) => {
+        const left = daysLeft(d);
+        const hit = which === 'expired' ? left <= 0 : (left > 0 && left <= 90);
+        if (!hit) return;
+        if (state.unit === 'TON') { if (p.kg != null) out += b * p.kg / 1000; }
+        else out += b;
+      });
+    });
+    return out;
+  };
+  const expiredU = expIn('expired'), soonU = expIn('soon');
+
+  // 창고 TOP5
+  const whAgg = {};
+  items.forEach(p => Object.entries(p.wh || {}).forEach(([w, b]) => {
+    const v = state.unit === 'TON' ? (p.kg == null ? 0 : b * p.kg / 1000) : b;
+    whAgg[w] = (whAgg[w] || 0) + v;
+  }));
+  const whTop = Object.entries(whAgg).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const whMax = Math.max(...whTop.map(x => x[1]), 1e-9);
+
+  box.innerHTML = `
+    <div class="flex items-center justify-between gap-2">
+      <h2 class="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+        <i class="fa-solid fa-chart-pie text-saseRed"></i> 전체 현황
+      </h2>
+      <span class="text-[10px] text-slate-400">${filtered ? `필터 ${items.length}개` : `${items.length}개 품번`}</span>
+    </div>
+
+    <div class="space-y-1.5">${bars}</div>
+
+    <div class="bg-amber-50/70 border border-amber-200 rounded-lg px-2.5 py-2">
+      <div class="text-[10px] font-bold text-amber-900 mb-1">⑦ 품절예측 <span class="font-normal">최근 ${state.view.N}영업일</span></div>
+      <div class="grid grid-cols-3 gap-1 text-center">
+        <div><div class="text-[9px] text-amber-700">출고 있음</div><b class="text-slate-900 text-sm">${withV.length}</b></div>
+        <div><div class="text-[9px] text-amber-700">긴급 D-${Core.CONFIG.URGENT_DAYS}</div><b class="text-saseRed text-sm">${urgent}</b></div>
+        <div><div class="text-[9px] text-amber-700">안전재고 미달</div><b class="text-amber-700 text-sm">${caution}</b></div>
+      </div>
+    </div>
+
+    ${hasExp ? `<div class="${expiredU > 0 ? 'bg-red-50 border-saseRed/40' : 'bg-slate-50 border-slate-200'} border rounded-lg px-2.5 py-2">
+      <div class="text-[10px] font-bold ${expiredU > 0 ? 'text-red-800' : 'text-slate-700'} mb-1">
+        <i class="fa-solid fa-calendar-check"></i> 소비기한
+      </div>
+      <div class="grid grid-cols-2 gap-1 text-center">
+        <div><div class="text-[9px] ${expiredU > 0 ? 'text-red-700' : 'text-slate-500'}">기한 경과</div>
+          <b class="${expiredU > 0 ? 'text-saseRed' : 'text-slate-400'} text-sm tabular-nums">${fmtNum(expiredU)}</b>
+          <span class="text-[9px] text-slate-400">${u} · ${expiredCodes}품번</span></div>
+        <div><div class="text-[9px] text-slate-500">90일 이내</div>
+          <b class="${soonU > 0 ? 'text-amber-700' : 'text-slate-400'} text-sm tabular-nums">${fmtNum(soonU)}</b>
+          <span class="text-[9px] text-slate-400">${u}</span></div>
+      </div>
+    </div>` : `<div class="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-[10px] text-slate-500">
+      <b>소비기한</b> 정보가 없는 자료입니다. LOT재고현황을 다시 올리면 표시됩니다.
+    </div>`}
+
+    <div class="min-w-0">
+      <div class="flex items-center justify-between gap-2 mb-1">
+        <span class="text-[10px] font-bold text-slate-700"><i class="fa-solid fa-building text-saseRed"></i> 보관 창고 TOP5</span>
+        <button onclick="openWarehouseModal(null)" class="no-print text-[10px] text-saseRed hover:underline font-bold" data-capture-ignore>전체 ▸</button>
+      </div>
+      <div class="space-y-1">${whTop.length ? whTop.map(([w, v]) => `
+        <div class="min-w-0">
+          <div class="flex items-baseline justify-between gap-1">
+            <span class="text-[10px] text-slate-500 truncate">${esc(w)}</span>
+            <span class="text-[10px] font-bold text-slate-800 tabular-nums whitespace-nowrap">${fmtNum(v)}</span>
+          </div>
+          <div class="w-full bg-slate-100 rounded-full h-1 overflow-hidden"><div class="bg-saseRed h-1 rounded-full" style="width:${Math.max(2, Math.round(v / whMax * 100))}%"></div></div>
+        </div>`).join('') : '<div class="text-[10px] text-slate-400">보관 재고 없음</div>'}</div>
+    </div>
+
+    <p class="text-[9px] text-slate-400 leading-tight mt-auto">상품을 클릭하면 그 상품의 상세(7단계 · 소비기한 · 창고)가 한 장으로 열립니다.</p>`;
 }
 
 /* ---------- 상품 상세 패널 ---------- */
@@ -1537,6 +1677,7 @@ function renderAll() {
   document.getElementById('emptyState').classList.toggle('hidden', has);
   document.getElementById('mainGrid').classList.toggle('hidden', !has);
   renderColumns();
+  renderSummary();
   if (isProductModalOpen()) { renderDetail(); renderDeepDive(); }
 }
 
@@ -2273,6 +2414,7 @@ window.onload = async function () {
   document.getElementById('velocityWindow').value = String(state.velocityWindow);
   setGlobalUnit(state.unit);
   renderViewModeToggle();
+  renderDenseToggle();
   tickClock(); setInterval(tickClock, 1000);
   await loadIndex();
   renderSnapshotSelect();
