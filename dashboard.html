@@ -1858,7 +1858,7 @@ function renderDeepDive() {
     arrSub = `${fmtArrival(a.nextTon, a.nextBox)}${u} · 원본 ETA(입항 예정)${a.bizDays != null ? ` · ${a.bizDays}영업일 뒤` : ''}`;
     arrCls = 'text-blue-600';
   } else if (bondedBox > 0) {
-    arrVal = '통관 중';
+    arrVal = '통관·검역 중';
     arrSub = `통관·검역 단계 잔량 ${fmtBoxIn(p, bondedBox)}${u} · 창고 입고일 미확정${a.unknownN ? ` · 입항 미확정 ${fmtArrival(a.unknownTon, a.unknownBox)}${u}` : ''}`;
     arrCls = 'text-indigo-600';
   } else if (a.unknownN) {
