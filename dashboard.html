@@ -123,6 +123,12 @@
         <select id="originFilter" onchange="onFilterChange()" class="py-1.5 px-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-saseRed text-slate-600">
           <option value="ALL">전체 원산지</option>
         </select>
+        <select id="whFilter" onchange="onFilterChange()" title="선택한 창고에 보관 재고가 있는 품번만 봅니다 (수량은 전체 기준)" class="py-1.5 px-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-saseRed text-slate-600 max-w-[170px]">
+          <option value="ALL">전체 창고</option>
+        </select>
+        <select id="groupFilter" onchange="onFilterChange()" title="재고보고서 제품군" class="py-1.5 px-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-saseRed text-slate-600 max-w-[170px]">
+          <option value="ALL">전체 제품군</option>
+        </select>
         <button onclick="resetView()" class="no-print py-1.5 px-2.5 text-xs bg-white hover:bg-slate-50 border border-slate-300 rounded-lg text-slate-600 font-semibold" title="상품 선택·검색어·원산지 필터를 처음 상태로" data-capture-ignore>
           <i class="fa-solid fa-rotate-left"></i> 화면 초기화
         </button>
@@ -322,6 +328,8 @@
           </div>
         </div>
       </div>
+
+      <div id="deepCargo"></div>
 
       <div id="deepExpiry"></div>
     </div>
@@ -1163,6 +1171,7 @@ const state = {
   tableActiveOnly: store.get('tableActiveOnly', true),   // 전체 요약: 단종·미운영 제외
   tableSort: store.get('tableSort', null) || { key: 'risk', dir: 'asc' },
   tableCard: null,                               // 요약 카드로 건 필터
+  cargoOpen: false,                              // 화물 목록 전체 펼침
   velocityWindow: store.get('velocityWindow', 20),
   index: { snapshots: [] },
   snapCache: {},
@@ -1296,6 +1305,7 @@ function setSnapshot(snap) {
   state.view = snap ? Core.compute(snap, { velocityWindow: state.velocityWindow }) : null;
   if (!state.view || !state.view.products.some(p => p.code === state.selected)) state.selected = null;
   buildOriginOptions();
+  buildFilterOptions();
   renderSnapshotSelect();
   renderDataBasis();
   renderAll();
@@ -1315,6 +1325,25 @@ function onVelocityWindowChange() {
 }
 
 /* ---------- 필터 ---------- */
+// 창고 · 제품군 선택지 (현재 스냅샷에 실제로 있는 값만)
+function buildFilterOptions() {
+  const products = state.view ? state.view.products : [];
+  const whSel = document.getElementById('whFilter');
+  const whCur = whSel.value;
+  const whs = new Set();
+  products.forEach(p => Object.keys(p.wh || {}).forEach(w => whs.add(w)));
+  whSel.innerHTML = '<option value="ALL">전체 창고</option>' +
+    [...whs].sort().map(w => `<option value="${esc(w)}">${esc(w)}</option>`).join('');
+  whSel.value = [...whSel.options].some(o => o.value === whCur) ? whCur : 'ALL';
+
+  const gSel = document.getElementById('groupFilter');
+  const gCur = gSel.value;
+  const gs = new Set();
+  products.forEach(p => { if (p.group) gs.add(p.group); });
+  gSel.innerHTML = '<option value="ALL">전체 제품군</option>' +
+    [...gs].sort().map(g => `<option value="${esc(g)}">${esc(g)}</option>`).join('');
+  gSel.value = [...gSel.options].some(o => o.value === gCur) ? gCur : 'ALL';
+}
 function buildOriginOptions() {
   const sel = document.getElementById('originFilter');
   const cur = sel.value;
@@ -1328,13 +1357,18 @@ function buildOriginOptions() {
 function filteredProducts() {
   if (!state.view) return [];
   const q = document.getElementById('searchInput').value.trim().toLowerCase();
-  const origin = document.getElementById('originFilter').value;
+  const selVal = id => { const e = document.getElementById(id); return (e && e.value) || 'ALL'; };
+  const origin = selVal('originFilter');
+  const wh = selVal('whFilter');
+  const group = selVal('groupFilter');
   // 검색어가 품번과 정확히 같으면(끝의 '+' 무시) 그 품번만, 아니면 품번·품명 포함 검색
   const qCode = Core.normCode(q);
   const exact = q && state.view.products.some(p => p.code.toLowerCase() === qCode);
   return state.view.products.filter(p => {
     if (exact && p.code.toLowerCase() !== qCode) return false;
     if (q && !(p.code.toLowerCase().includes(q) || p.raw.toLowerCase().includes(q) || p.name.toLowerCase().includes(q))) return false;
+    if (wh !== 'ALL' && !((p.wh || {})[wh] > 0)) return false;
+    if (group !== 'ALL' && p.group !== group) return false;
     if (origin === 'NONE') return !p.origin;
     if (origin !== 'ALL') return (p.origin || '').split('·').includes(origin);
     return true;
@@ -1656,6 +1690,7 @@ function selectProduct(code) {
 function openProductModal() {
   if (!state.view || !state.selected) return;
   if (!state.view.products.some(x => x.code === state.selected)) return;
+  state.cargoOpen = false;
   renderDetail();
   renderDeepDive();
   openModal('productModal');
@@ -1707,6 +1742,9 @@ function renderSearchNotice(items) {
 function resetView() {
   document.getElementById('searchInput').value = '';
   document.getElementById('originFilter').value = 'ALL';
+  document.getElementById('whFilter').value = 'ALL';
+  document.getElementById('groupFilter').value = 'ALL';
+  state.tableCard = null;
   state.selected = null;
   renderAll();
 }
@@ -2014,6 +2052,7 @@ function renderDeepDive() {
   }
   document.getElementById('deepExpiry').innerHTML =
     box('소비기한별 보관 재고', 'fa-calendar-check', expHtml, `<span class="text-[10px] text-slate-400">${p.exp == null ? '' : `${rows.length}개 기한${p.expUnknown ? ' + 미상' : ''}`}</span>`);
+  renderCargoList();
   document.getElementById('deepWh').innerHTML =
     box('창고별 보관', 'fa-building', whHtml, `<button onclick="openWarehouseModalForSelected()" class="no-print text-[11px] text-saseRed hover:underline font-bold" data-capture-ignore>창고 전체보기 ▸</button>`);
 
@@ -2137,6 +2176,91 @@ function openWarehouseModal(code) {
       }
     }
   });
+}
+
+/* ---------- 화물 목록 (①~③ 주간재고보고서 행 단위) ---------- */
+const CARGO_STAGE = { s1: ['① 해외생산', 'bg-slate-100 text-slate-600'], s2: ['② 선적·항해', 'bg-blue-100 text-blue-700'], s3: ['③ 통관·검역', 'bg-indigo-100 text-indigo-700'], ex: ['수출분', 'bg-slate-100 text-slate-400'] };
+function toggleCargoList() {
+  state.cargoOpen = !state.cargoOpen;
+  renderCargoList();
+}
+function renderCargoList() {
+  const box = document.getElementById('deepCargo');
+  if (!box) return;
+  const p = state.view && state.selected ? state.view.products.find(x => x.code === state.selected) : null;
+  if (!p) { box.innerHTML = ''; return; }
+  const u = unitLabel();
+  const rows = (p.cargo || []).filter(c => c[0] !== 'ex');
+
+  if (!hasCargoData()) {
+    box.innerHTML = `<div class="border border-slate-200 rounded-xl p-3.5 text-[11px] text-slate-500">
+      <b class="text-slate-700"><i class="fa-solid fa-ship text-saseRed"></i> 화물 목록</b> ·
+      주간재고보고서를 다시 올리면 B/L · 선적처 · 입항 예정일(ETA)이 표시됩니다.</div>`;
+    return;
+  }
+  if (!rows.length) {
+    box.innerHTML = `<div class="border border-slate-200 rounded-xl p-3.5 text-[11px] text-slate-400">
+      <b class="text-slate-700"><i class="fa-solid fa-ship text-saseRed"></i> 화물 목록</b> · 진행 중인 화물이 없습니다.</div>`;
+    return;
+  }
+
+  // 아직 안 들어온 것(①②)을 ETA 순으로 먼저, 통관·검역(③)은 그다음
+  const order = { s1: 1, s2: 0, s3: 2 };
+  const sorted = [...rows].sort((a, b) => (order[a[0]] - order[b[0]]) || String(a[4] || a[3] || '9999').localeCompare(String(b[4] || b[3] || '9999')));
+  const shown = state.cargoOpen ? sorted : sorted.slice(0, 5);
+  const T = state.view.T;
+
+  const body = shown.map(c => {
+    const [stg, ton, box2, etd, eta, inDate, qcDate, wh, bl, shipper, order2, seq] = c;
+    const [label, cls] = CARGO_STAGE[stg] || ['-', ''];
+    const etaCls = !eta ? 'text-amber-700' : (stg !== 's3' && eta < T) ? 'text-saseRed font-bold' : 'text-slate-700';
+    const etaTxt = eta ? fmtMD(eta) + (stg !== 's3' && eta < T ? ' 경과' : '') : '미확정';
+    return `<tr class="border-t border-slate-100">
+      <td class="px-1.5 py-1"><span class="text-[10px] font-bold px-1.5 py-0.5 rounded ${cls} whitespace-nowrap">${label}</span></td>
+      <td class="px-1.5 py-1 text-right tabular-nums font-bold text-slate-900 whitespace-nowrap">${state.unit === 'TON' ? fmtNum(ton) : (box2 ? fmtNum(box2) : '-')}</td>
+      <td class="px-1.5 py-1 text-slate-500 whitespace-nowrap">${etd ? fmtMD(etd) : '-'}</td>
+      <td class="px-1.5 py-1 ${etaCls} whitespace-nowrap">${etaTxt}</td>
+      <td class="px-1.5 py-1 text-slate-500 whitespace-nowrap">${inDate ? fmtMD(inDate) : '-'}</td>
+      <td class="px-1.5 py-1 text-slate-500 whitespace-nowrap">${qcDate ? fmtMD(qcDate) : '-'}</td>
+      <td class="px-1.5 py-1 text-slate-500 truncate max-w-[130px]" title="${esc(wh)}">${esc(wh && wh !== '0' ? wh : '-')}</td>
+      <td class="px-1.5 py-1 text-slate-400 truncate max-w-[150px]" title="${esc(bl)}">${esc(bl && bl !== '0' ? bl : '-')}</td>
+      <td class="px-1.5 py-1 text-slate-400 whitespace-nowrap">${esc(shipper && shipper !== '0' ? shipper : '-')}</td>
+      <td class="px-1.5 py-1 text-slate-400 truncate max-w-[120px]" title="${esc(order2)} ${esc(seq)}">${esc(order2 || '-')}${seq ? `-${esc(seq)}` : ''}</td>
+    </tr>`;
+  }).join('');
+
+  const n1 = rows.filter(c => c[0] === 's1').length, n2 = rows.filter(c => c[0] === 's2').length, n3 = rows.filter(c => c[0] === 's3').length;
+  box.innerHTML = `<div class="border border-slate-200 rounded-xl p-3.5 min-w-0">
+      <div class="flex items-center justify-between gap-2 mb-2.5">
+        <h3 class="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+          <i class="fa-solid fa-ship text-saseRed"></i> 화물 목록
+          <span class="font-normal text-slate-400">① ${n1}건 · ② ${n2}건 · ③ ${n3}건</span>
+        </h3>
+        ${rows.length > 5 ? `<button onclick="toggleCargoList()" class="no-print text-[11px] text-saseRed hover:underline font-bold" data-capture-ignore>${state.cargoOpen ? '접기 ▴' : `전체 ${rows.length}건 보기 ▾`}</button>` : ''}
+      </div>
+      <div class="overflow-x-auto custom-scroll">
+        <table class="w-full text-[11px] min-w-[720px]">
+          <thead><tr class="text-slate-500">
+            <th class="text-left font-semibold px-1.5 pb-1.5">단계</th>
+            <th class="text-right font-semibold px-1.5 pb-1.5">수량(${u})</th>
+            <th class="text-left font-semibold px-1.5 pb-1.5">출항(ETD)</th>
+            <th class="text-left font-semibold px-1.5 pb-1.5">입항 예정(ETA)</th>
+            <th class="text-left font-semibold px-1.5 pb-1.5">입고일</th>
+            <th class="text-left font-semibold px-1.5 pb-1.5">검역완료일</th>
+            <th class="text-left font-semibold px-1.5 pb-1.5">입고창고</th>
+            <th class="text-left font-semibold px-1.5 pb-1.5">B/L No</th>
+            <th class="text-left font-semibold px-1.5 pb-1.5">Shipper</th>
+            <th class="text-left font-semibold px-1.5 pb-1.5">Order · Seq</th>
+          </tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+      <p class="text-[10px] text-slate-400 mt-2 leading-relaxed">
+        주간재고보고서(${state.view.B} 기준) 2.미통관재고의 화물 행 그대로입니다 · 주 1회 갱신 ·
+        ETA 는 선사가 올린 입항 예정일이며 창고 입고일이 아닙니다 ·
+        B/L 미발행 건은 '-' 로 표시됩니다.
+      </p>
+    </div>`;
 }
 
 /* ---------- 전체 요약 뷰 (탭) ---------- */
@@ -2363,9 +2487,12 @@ function openExportModal(type) {
   const items = filteredProducts();
   const q = document.getElementById('searchInput').value.trim();
   const origin = document.getElementById('originFilter').value;
+  const whF = document.getElementById('whFilter').value;
+  const groupF = document.getElementById('groupFilter').value;
   document.getElementById('exportScope').innerText = type === 'excel'
     ? `대상 ${items.length}개 품번 · 단위 ${unitLabel()} 기준(박스·톤 모두 포함)`
     + `${q ? ` · 검색 '${q}'` : ''}${origin && origin !== 'ALL' ? ` · 원산지 ${origin}` : ''}`
+    + `${whF && whF !== 'ALL' ? ` · 창고 ${whF}` : ''}${groupF && groupF !== 'ALL' ? ` · 제품군 ${groupF}` : ''}`
     : `현재 화면 그대로 · 단위 ${unitLabel()} · ${state.sync ? '⑤ 보관 기준 동기화 보기' : '개별 정렬 보기'}`;
   openModal('exportModal');
 }
