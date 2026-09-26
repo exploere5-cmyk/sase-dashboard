@@ -39,8 +39,10 @@
     /* 7단계 구역: 컬럼 머리말은 고정하고 목록만 세로로 스크롤 (인쇄·이미지·PDF에서는 아래에서 해제) */
     #stageScroller { max-height: max(360px, calc(100vh - 230px)); overflow-y: auto; }
     .stage-head { position: sticky; top: 0; z-index: 5; }
+    #deepScroller { max-height: max(360px, calc(100vh - 260px)); overflow-y: auto; }
     body.capturing #appHeader, body.capturing #siteFooter, body.capturing #detailPanel { position: static !important; }
     body.capturing #stageScroller { overflow: visible !important; max-height: none !important; }
+    body.capturing #deepScroller { overflow: visible !important; max-height: none !important; }
     body.capturing .stage-head { position: static !important; }
     body.capturing #siteFooter { backdrop-filter: none; }
     @media print {
@@ -50,6 +52,7 @@
       #appHeader { position: static !important; box-shadow: none !important; }
       #siteFooter { position: static !important; border-top: 1px solid #E2E8F0; }
       #stageScroller { overflow: visible !important; max-height: none !important; }
+      #deepScroller { overflow: visible !important; max-height: none !important; }
       .stage-head { position: static !important; }
       #stageColumns { min-width: 0 !important; }
       #mainGrid { grid-template-columns: minmax(0, 1fr) 340px !important; }
@@ -184,6 +187,24 @@
           <i class="fa-solid fa-circle-info"></i>
           <span id="stageFootnote">상품을 클릭하면 오른쪽에서 해당 상품의 7단계 수량이 표시됩니다.</span>
         </p>
+      </section>
+
+      <!-- 선택 상품 심층 분석: 7단계 구역 아래 빈 공간 -->
+      <section id="deepSection" class="hidden xl:col-start-1 bg-white rounded-xl shadow-sm border border-slate-200 min-w-0 flex flex-col overflow-hidden">
+        <div class="px-4 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+          <h2 class="text-sm font-bold text-slate-800 flex items-center gap-2 min-w-0">
+            <i class="fa-solid fa-chart-simple text-saseRed"></i> 선택 상품 심층 분석
+            <span id="deepSubject" class="text-xs font-normal text-slate-500 truncate"></span>
+          </h2>
+          <div class="flex items-center gap-2 no-print" data-capture-ignore>
+            <button onclick="clearSelection()" class="text-xs bg-white hover:bg-red-50 text-saseRed font-bold px-2.5 py-1.5 rounded-lg border border-saseRed/40 flex items-center gap-1.5" title="선택 해제 (Esc)">
+              <i class="fa-solid fa-xmark"></i> 선택 해제
+            </button>
+          </div>
+        </div>
+        <div id="deepScroller" class="custom-scroll p-4">
+          <div id="deepBody" class="space-y-3"></div>
+        </div>
       </section>
 
       <!-- 상품 상세 패널 -->
@@ -717,11 +738,28 @@ const Core = (() => {
   }
 
   /* ---------- (5) 기간별재고현황(LOT) ---------- */
+  // LOT No. 안의 6자리 숫자(YYMMDD)를 소비기한으로 읽는다. 예: '9126-1014 270908 GD' → 2027-09-08
+  // '260917/271214' 처럼 두 개면 앞은 제조일, 뒤는 소비기한이므로 더 미래인 쪽을 쓴다.
+  function lotExpiry(s) {
+    const toks = String(s == null ? '' : s).match(/(?<!\d)\d{6}(?!\d)/g);
+    if (!toks) return null;
+    let best = null;
+    for (const t of toks) {
+      const y = +t.slice(0, 2), m = +t.slice(2, 4), d = +t.slice(4, 6);
+      const dt = new Date(2000 + y, m - 1, d);
+      if (dt.getMonth() + 1 !== m || dt.getDate() !== d) continue;        // 2월 31일 같은 값 제외
+      const iso = `20${t.slice(0, 2)}-${t.slice(2, 4)}-${t.slice(4, 6)}`;
+      if (!best || iso > best) best = iso;
+    }
+    return best;
+  }
   function parseLot(book) {
     const rows = book.rows(book.sheetNames[0]);
     const { headerRow, idx } = headerMap(rows, { wh: '창고', code: '품번', unit: '재고단위', end: '기말재고' });
-    const lot = {};
-    let n = 0, nonBox = 0, zeroEnd = 0, totalBox = 0;
+    // LOT No. 열은 없을 수도 있으므로 머리글에서 따로 찾는다 (없으면 소비기한 집계만 건너뛴다)
+    const lotCol = (rows[headerRow] || []).map(str).findIndex(x => x.toUpperCase().includes('LOT'));
+    const lot = {}, expAgg = {};
+    let n = 0, nonBox = 0, zeroEnd = 0, totalBox = 0, expRows = 0, noExpRows = 0;
     for (let i = headerRow + 1; i < rows.length; i++) {
       const r = rows[i] || [];
       const wh = str(r[idx.wh]); const code = normCode(r[idx.code]);
@@ -733,8 +771,18 @@ const Core = (() => {
       totalBox += end;
       const p = lot[code] || (lot[code] = {});
       p[wh] = round((p[wh] || 0) + end);
+      if (lotCol >= 0 && end !== 0) {
+        const exp = lotExpiry(r[lotCol]) || '';
+        if (exp) expRows++; else noExpRows++;
+        const a = expAgg[code] || (expAgg[code] = {});
+        const key = `${wh}\u0001${exp}`;
+        a[key] = round((a[key] || 0) + end);
+      }
     }
-    return { data: lot, meta: { rows: n, totalBox: round(totalBox), nonBox, zeroEnd } };
+    const expiry = {};
+    for (const [code, a] of Object.entries(expAgg))
+      expiry[code] = Object.entries(a).map(([k, v]) => { const i = k.indexOf('\u0001'); return [k.slice(0, i), k.slice(i + 1), v]; });
+    return { data: lot, expiry, meta: { rows: n, totalBox: round(totalBox), nonBox, zeroEnd, expRows, noExpRows } };
   }
 
   /* ---------- (6) 품번마스터 ---------- */
@@ -828,6 +876,7 @@ const Core = (() => {
       products,
       receipts: parsed.receipt ? parsed.receipt.data : (prev && prev.receipts) || [],
       lot: parsed.lot ? parsed.lot.data : (prev && prev.lot) || {},
+      lotExp: parsed.lot ? (parsed.lot.expiry || {}) : (prev && prev.lotExp) || {},   // 소비기한별 보관 [창고, 소비기한, 박스]
       salesIssue: issue.daily, coverIssue: issue.cover,
       salesMove: move.daily, coverMove: move.cover
     };
@@ -933,6 +982,19 @@ const Core = (() => {
         if (isExcludedWh(w)) exclBox += q; else { s5box += q; if (q) wh[w] = q; }
       }
 
+      // 소비기한별 보관 (⑤ 와 같은 기준 = 제외창고 제외). LOT No. 없는 스냅샷은 null
+      const expSrc = snap.lotExp ? snap.lotExp[code] : null;
+      let exp = null, expUnknown = 0, expExcl = 0;
+      if (expSrc) {
+        const agg = {};
+        for (const [w, e, q] of expSrc) {
+          if (!q) continue;
+          if (isExcludedWh(w)) { expExcl = round(expExcl + q); continue; }
+          if (e) agg[e] = round((agg[e] || 0) + q); else expUnknown = round(expUnknown + q);
+        }
+        exp = Object.keys(agg).sort().map(d => ({ d, box: agg[d] }));
+      }
+
       let s6box = 0;
       for (const d of allCover) if (inPeriod(d)) s6box += salesOn(d, code);
 
@@ -950,7 +1012,7 @@ const Core = (() => {
       };
       const hasPipeline = [1, 2, 3].some(k => (st[k].ton || 0) > 0 || (st[k].box || 0) > 0);
       products.push({
-        code, ...p, st, s3weekly: s3w, recon, wh, exclBox,
+        code, ...p, st, s3weekly: s3w, recon, wh, exclBox, exp, expUnknown, expExcl,
         V, S, D, eta, sampleDays: n, sampleShort: n < N,
         noSales: V === 0, urgent: D != null && D <= CONFIG.URGENT_DAYS, caution: S != null && V > 0 && s5box < S,
         refill: S != null && V > 0 && s5box < S && hasPipeline,
@@ -1328,11 +1390,13 @@ function selectProduct(code) {
   state.selected = state.selected === code ? null : code;
   renderColumns();
   renderDetail();
+  renderDeepDive();
 }
 function clearSelection() {
   state.selected = null;
   renderColumns();
   renderDetail();
+  renderDeepDive();
 }
 // 검색·필터가 바뀌면: 결과가 1개이거나 품번이 정확히 일치하면 자동 선택, 선택 상품이 결과에서 빠지면 해제
 function onFilterChange() {
@@ -1513,6 +1577,222 @@ function renderAll() {
   document.getElementById('mainGrid').classList.toggle('hidden', !has);
   renderColumns();
   renderDetail();
+  renderDeepDive();
+}
+
+/* ---------- 선택 상품 심층 분석 (소비기한별 재고 · 창고 · 핵심 지표) ---------- */
+let expiryChartInstance = null, whChartInstance = null;
+function destroyDeepCharts() {
+  if (expiryChartInstance) { expiryChartInstance.destroy(); expiryChartInstance = null; }
+  if (whChartInstance) { whChartInstance.destroy(); whChartInstance = null; }
+}
+// 박스 값을 현재 단위로. 톤인데 박스당 중량이 없으면 null (표시는 '-')
+function boxIn(p, box) { return state.unit === 'TON' ? (p.kg == null ? null : box * p.kg / 1000) : box; }
+function fmtBoxIn(p, box) { const v = boxIn(p, box); return v == null ? '-' : fmtNum(v); }
+function isoOf(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
+function daysBetween(aISO, bISO) {
+  return Math.round((new Date(bISO + 'T00:00:00') - new Date(aISO + 'T00:00:00')) / 86400000);
+}
+// a 다음 날부터 b 까지의 영업일 수 (소진 가능량 계산용)
+function bizDaysBetween(aISO, bISO) {
+  if (daysBetween(aISO, bISO) <= 0) return 0;
+  const d = new Date(aISO + 'T00:00:00'), end = new Date(bISO + 'T00:00:00');
+  let n = 0, guard = 0;
+  while (d < end && guard++ < 4000) { d.setDate(d.getDate() + 1); if (d <= end && Core.isBizDay(isoOf(d))) n++; }
+  return n;
+}
+// 선입선출(소비기한이 짧은 것부터 나간다) 가정으로 각 소비기한 물량이 기한 안에 소진되는지 계산
+function expiryRows(p, T) {
+  const V = p.V;
+  let cum = 0;
+  return (p.exp || []).map(({ d, box }) => {
+    cum = Math.round((cum + box) * 1000) / 1000;
+    const dleft = daysBetween(T, d);
+    const sellable = V > 0 ? V * bizDaysBetween(T, d) : 0;
+    const risk = dleft <= 0 ? 0 : V > 0 ? Math.max(0, Math.min(box, cum - sellable)) : box;
+    return { d, box, cum, dleft, risk, over: dleft <= 0 ? box : 0, useBiz: V > 0 ? cum / V : null };
+  });
+}
+function expiryVerdict(p, r) {
+  if (r.dleft <= 0) return ['기한 경과', 'bg-slate-700 text-white'];
+  if (!(p.V > 0)) return ['판매 실적 없음', 'bg-slate-100 text-slate-500'];
+  if (r.risk >= r.box - 1e-6) return ['전량 초과 위험', 'bg-red-100 text-red-700'];
+  if (r.risk > 0) return ['일부 초과 위험', 'bg-amber-100 text-amber-800'];
+  return ['기한 내 소진', 'bg-emerald-100 text-emerald-700'];
+}
+
+function renderDeepDive() {
+  const sec = document.getElementById('deepSection');
+  const p = state.view && state.selected ? state.view.products.find(x => x.code === state.selected) : null;
+  destroyDeepCharts();
+  if (!p) { sec.classList.add('hidden'); return; }
+  sec.classList.remove('hidden');
+  document.getElementById('deepSubject').innerText = `${p.raw} · ${p.name}`;
+
+  const T = state.view.T, u = unitLabel();
+  const pipeline = [1, 2, 3, 4].reduce((a, k) => a + (p.st[k].box || 0), 0);
+  const coverAll = p.V > 0 ? (p.st[5].box + pipeline) / p.V : null;
+  const tiles = [
+    ['현재고 ⑤', fmtBoxIn(p, p.st[5].box), u, 'text-saseRed'],
+    ['일평균 소진', p.V == null ? '-' : fmtBoxIn(p, p.V), `${u}/영업일`, 'text-slate-800'],
+    [`최소 보관수량 (${Core.CONFIG.LEAD_TIME_DAYS}영업일)`, p.S == null ? '-' : fmtBoxIn(p, p.S), u, p.caution ? 'text-amber-600' : 'text-slate-800'],
+    ['예상 소진', p.D == null ? '-' : `D-${Math.floor(p.D)}`, p.eta ? `${p.eta} 예상` : '판매 실적 없음', p.urgent ? 'text-saseRed' : 'text-slate-800'],
+    ['입고 예정 ①~④', fmtBoxIn(p, pipeline), u, 'text-blue-600'],
+    ['총 확보 영업일', coverAll == null ? '-' : Math.floor(coverAll).toLocaleString(), '현재고+입고예정 기준', 'text-slate-800']
+  ].map(([label, val, sub, cls]) => `<div class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
+      <div class="text-[11px] text-slate-500 truncate">${label}</div>
+      <div class="text-lg font-extrabold ${cls} tabular-nums leading-tight">${val}</div>
+      <div class="text-[10px] text-slate-400 truncate">${sub}</div>
+    </div>`).join('');
+
+  // 소비기한별 재고
+  let expHtml;
+  const rows = expiryRows(p, T);
+  if (p.exp == null) {
+    expHtml = `<div class="bg-amber-50 border border-amber-200 text-amber-900 text-xs rounded-xl px-3.5 py-3">
+      <b>이 데이터에는 소비기한 정보가 없습니다.</b> 소비기한은 LOT재고현황의 <b>LOT No.</b> 안에 있는 6자리 숫자(YYMMDD)에서 읽습니다.
+      화면 위 <b>[데이터 업로드]</b>에서 LOT재고현황 파일을 다시 올리면 이 자리에 소비기한별 재고가 표시됩니다.
+    </div>`;
+  } else if (!rows.length && !p.expUnknown) {
+    expHtml = `<div class="text-xs text-slate-400 py-6 text-center">보관 중인 재고가 없어 소비기한별 내역이 없습니다.</div>`;
+  } else {
+    const totalBox = rows.reduce((a, r) => a + r.box, 0) + p.expUnknown;
+    const expired = rows.filter(r => r.dleft <= 0).reduce((a, r) => a + r.box, 0);
+    const soon90 = rows.filter(r => r.dleft > 0 && r.dleft <= 90).reduce((a, r) => a + r.box, 0);
+    const risk = rows.reduce((a, r) => a + r.risk, 0);
+    const chip = (label, box, cls) => `<div class="${cls} rounded-lg px-3 py-2 min-w-0">
+        <div class="text-[11px] opacity-80 truncate">${label}</div>
+        <div class="text-sm font-extrabold tabular-nums">${fmtBoxIn(p, box)} <span class="text-[10px] font-bold opacity-70">${u}</span>
+          <span class="text-[10px] font-semibold opacity-70">${totalBox ? `· ${Math.round(box / totalBox * 100)}%` : ''}</span></div>
+      </div>`;
+    const summary = `<div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      ${chip('전체 보관', totalBox, 'bg-slate-100 text-slate-700')}
+      ${chip('기한 경과', expired, expired ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-500')}
+      ${chip('90일 이내 만료', soon90, soon90 ? 'bg-amber-100 text-amber-900' : 'bg-slate-100 text-slate-500')}
+      ${chip('기한 초과 위험', risk, risk ? 'bg-red-100 text-red-800' : 'bg-emerald-50 text-emerald-700')}
+    </div>`;
+
+    const tr = rows.map(r => {
+      const [label, cls] = expiryVerdict(p, r);
+      const pct = totalBox ? Math.round(r.box / totalBox * 100) : 0;
+      return `<tr class="border-t border-slate-100 ${r.dleft <= 0 ? 'bg-slate-50' : ''}">
+        <td class="py-1.5 pr-2 font-bold text-slate-800 whitespace-nowrap">${r.d}</td>
+        <td class="py-1.5 pr-2 text-right tabular-nums ${r.dleft <= 0 ? 'text-slate-500' : r.dleft <= 90 ? 'text-amber-700 font-bold' : 'text-slate-600'}">${r.dleft <= 0 ? `${-r.dleft}일 경과` : `${r.dleft.toLocaleString()}일`}</td>
+        <td class="py-1.5 pr-2 text-right font-bold tabular-nums text-slate-900">${fmtBoxIn(p, r.box)}</td>
+        <td class="py-1.5 pr-2 text-right tabular-nums text-slate-500">${pct}%</td>
+        <td class="py-1.5 pr-2 text-right tabular-nums text-slate-500">${fmtBoxIn(p, r.cum)}</td>
+        <td class="py-1.5 pr-2 text-right tabular-nums text-slate-500">${r.useBiz == null ? '-' : `${Math.ceil(r.useBiz).toLocaleString()}영업일`}</td>
+        <td class="py-1.5 text-right"><span class="text-[10px] font-bold px-1.5 py-0.5 rounded ${cls} whitespace-nowrap">${label}</span>${r.risk > 0 && r.dleft > 0 ? `<div class="text-[10px] text-red-600 font-bold tabular-nums">위험 ${fmtBoxIn(p, r.risk)}</div>` : ''}</td>
+      </tr>`;
+    }).join('');
+    const unknownRow = p.expUnknown ? `<tr class="border-t border-slate-100 bg-slate-50">
+        <td class="py-1.5 pr-2 font-bold text-slate-500">(미상)</td>
+        <td class="py-1.5 pr-2 text-right text-slate-400">-</td>
+        <td class="py-1.5 pr-2 text-right font-bold tabular-nums text-slate-600">${fmtBoxIn(p, p.expUnknown)}</td>
+        <td class="py-1.5 pr-2 text-right tabular-nums text-slate-500">${totalBox ? Math.round(p.expUnknown / totalBox * 100) : 0}%</td>
+        <td class="py-1.5 pr-2 text-right text-slate-400">-</td>
+        <td class="py-1.5 pr-2 text-right text-slate-400">-</td>
+        <td class="py-1.5 text-right"><span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">기한 미상</span></td>
+      </tr>` : '';
+
+    expHtml = `${summary}
+      <div class="mt-3 bg-white border border-slate-200 rounded-xl p-3">
+        <div style="height:220px"><canvas id="expiryChart"></canvas></div>
+      </div>
+      <div class="mt-3 overflow-x-auto custom-scroll">
+        <table class="w-full text-[11px] min-w-[560px]">
+          <thead><tr class="text-slate-500">
+            <th class="text-left font-semibold pb-1.5">소비기한</th>
+            <th class="text-right font-semibold pb-1.5">남은 기간</th>
+            <th class="text-right font-semibold pb-1.5">수량(${u})</th>
+            <th class="text-right font-semibold pb-1.5">비중</th>
+            <th class="text-right font-semibold pb-1.5">누적</th>
+            <th class="text-right font-semibold pb-1.5">누적 소진 소요</th>
+            <th class="text-right font-semibold pb-1.5">판정</th>
+          </tr></thead>
+          <tbody>${tr}${unknownRow}</tbody>
+        </table>
+      </div>
+      <p class="text-[10px] text-slate-400 mt-2 leading-relaxed">
+        소비기한은 LOT No. 안의 6자리 숫자(YYMMDD)에서 읽습니다 (예: <b>271120</b> → 2027-11-20). 숫자가 두 개면 뒤쪽(더 미래)을 소비기한으로 봅니다.
+        판정은 소비기한이 짧은 물량부터 나간다고 보고(선입선출), 기한까지 남은 영업일 × 일평균 소진(${fmtBoxIn(p, p.V || 0)}${u}) 과 누적 수량을 비교한 값입니다.
+        제외창고(샘플·불량·버츄얼) 재고 ${fmtBoxIn(p, p.expExcl || 0)}${u} 는 ⑤ 보관과 같은 기준으로 빠져 있습니다.
+      </p>`;
+  }
+
+  // 창고별 보관
+  const whList = Object.entries(p.wh || {}).sort((a, b) => b[1] - a[1]);
+  const whHtml = whList.length
+    ? `<div style="height:${Math.max(140, Math.min(whList.length, 12) * 26 + 40)}px"><canvas id="deepWhChart"></canvas></div>`
+    : '<div class="text-xs text-slate-400 py-6 text-center">보관 중인 창고가 없습니다.</div>';
+
+  const box = (title, icon, body, extra = '') => `<div class="border border-slate-200 rounded-xl p-3.5 min-w-0">
+      <div class="flex items-center justify-between gap-2 mb-2.5">
+        <h3 class="text-xs font-bold text-slate-800 flex items-center gap-1.5"><i class="fa-solid ${icon} text-saseRed"></i> ${title}</h3>
+        ${extra}
+      </div>${body}</div>`;
+
+  document.getElementById('deepBody').innerHTML = `
+    <div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">${tiles}</div>
+    ${box('소비기한별 보관 재고', 'fa-calendar-check', expHtml, `<span class="text-[10px] text-slate-400">${p.exp == null ? '' : `${rows.length}개 기한${p.expUnknown ? ' + 미상' : ''}`}</span>`)}
+    ${box('창고별 보관', 'fa-building', whHtml, `<button onclick="openWarehouseModalForSelected()" class="no-print text-[11px] text-saseRed hover:underline font-bold" data-capture-ignore>창고 전체보기 ▸</button>`)}
+  `;
+
+  // 차트 (막대 = 현재 단위, 소비기한은 월별로 묶어 쌓기)
+  if (p.exp && (rows.length || p.expUnknown)) {
+    const months = [];
+    const midx = {};
+    const add = (key, field, v) => {
+      if (midx[key] == null) { midx[key] = months.length; months.push({ key, 경과: 0, 위험: 0, 정상: 0, 미상: 0 }); }
+      months[midx[key]][field] += v;
+    };
+    rows.forEach(r => {
+      const key = r.d.slice(2, 7).replace('-', '.');
+      if (r.dleft <= 0) add(key, '경과', r.box);
+      else { add(key, '위험', r.risk); add(key, '정상', r.box - r.risk); }
+    });
+    if (p.expUnknown) add('미상', '미상', p.expUnknown);
+    const conv = v => { const x = boxIn(p, v); return x == null ? 0 : +x.toFixed(state.unit === 'TON' ? 2 : 0); };
+    const ds = [
+      { label: '기한 경과', data: months.map(m => conv(m.경과)), backgroundColor: '#475569' },
+      { label: '기한 초과 위험', data: months.map(m => conv(m.위험)), backgroundColor: '#C8102E' },
+      { label: '기한 내 소진 가능', data: months.map(m => conv(m.정상)), backgroundColor: '#10B981' },
+      { label: '기한 미상', data: months.map(m => conv(m.미상)), backgroundColor: '#CBD5E1' }
+    ].filter(d => d.data.some(v => v > 0));
+    expiryChartInstance = new Chart(document.getElementById('expiryChart').getContext('2d'), {
+      type: 'bar',
+      data: { labels: months.map(m => m.key), datasets: ds.map(d => ({ ...d, borderRadius: 3, stack: 'exp' })) },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10, family: 'Pretendard' } } },
+          tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.raw.toLocaleString()} ${u}` } }
+        },
+        scales: {
+          x: { stacked: true, grid: { display: false }, ticks: { font: { size: 10, family: 'Pretendard' } } },
+          y: { stacked: true, beginAtZero: true, ticks: { font: { size: 10, family: 'Pretendard' } } }
+        }
+      }
+    });
+  }
+  if (whList.length) {
+    const top = whList.slice(0, 12);
+    whChartInstance = new Chart(document.getElementById('deepWhChart').getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: top.map(([w]) => w),
+        datasets: [{ label: `보관 (${u})`, data: top.map(([, v]) => { const x = boxIn(p, v); return x == null ? 0 : +x.toFixed(state.unit === 'TON' ? 2 : 0); }), backgroundColor: '#C8102E', borderRadius: 3 }]
+      },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `보관: ${c.raw.toLocaleString()} ${u}` } } },
+        scales: {
+          x: { beginAtZero: true, ticks: { font: { size: 10, family: 'Pretendard' } } },
+          y: { grid: { display: false }, ticks: { font: { size: 10, family: 'Pretendard' } } }
+        }
+      }
+    });
+  }
 }
 
 /* ---------- 창고 모달 ---------- */
