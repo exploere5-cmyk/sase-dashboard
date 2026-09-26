@@ -160,7 +160,11 @@
             <i class="fa-solid fa-route text-saseRed"></i> 해외 수입 7단계 상품별 현황
             <span class="text-xs font-normal text-slate-500" id="productCountBadge"></span>
           </h2>
-          <div class="flex items-center gap-4 text-[11px] text-slate-500">
+          <div class="flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
+            <div class="bg-slate-100 p-0.5 rounded-lg border border-slate-200 flex items-center font-semibold" data-capture-ignore>
+              <button type="button" id="viewModeIndivBtn" onclick="setSyncMode(false)" class="px-2.5 py-1 rounded-md transition-all bg-white text-saseRed shadow-sm">개별 정렬 보기</button>
+              <button type="button" id="viewModeSyncBtn" onclick="setSyncMode(true)" class="px-2.5 py-1 rounded-md transition-all text-slate-500 hover:text-slate-900">⑤ 보관 기준 동기화 보기</button>
+            </div>
             <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-saseRed"></span> ①~⑥ 수량 (<span class="currentUnitLabel">톤</span>)</span>
             <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-saseOrange"></span> ⑦ 예상 소진 영업일</span>
             <span>≈ 환산값</span>
@@ -983,6 +987,8 @@ const store = {
 const state = {
   unit: store.get('unit', 'TON'),
   cols: store.get('cols', null) || Object.fromEntries(STAGES.map(s => [s.k, { top: 10, sort: s.k === 7 ? 'asc' : 'desc' }])),
+  sync: store.get('sync', false),          // ⑤ 보관 기준 동기화 보기 여부
+  syncSort: store.get('syncSort', 'asc'),  // 동기화 보기 정렬 (기본: 적은순 = 재고 없는 상품부터)
   velocityWindow: store.get('velocityWindow', 20),
   index: { snapshots: [] },
   snapCache: {},
@@ -1161,11 +1167,37 @@ function setColOption(k, key, val) {
   store.set('cols', state.cols);
   renderColumns();
 }
+// ⑤ 보관 기준 동기화 보기 — 개별 보기의 컬럼별 정렬과 섞이지 않게 정렬 기준을 따로 기억한다
+function setSyncSort(val) {
+  state.syncSort = val;
+  store.set('syncSort', val);
+  renderColumns();
+}
+function setSyncMode(on) {
+  state.sync = !!on;
+  store.set('sync', state.sync);
+  renderViewModeToggle();
+  renderColumns();
+}
+function renderViewModeToggle() {
+  const on = 'px-2.5 py-1 rounded-md transition-all bg-white text-saseRed shadow-sm';
+  const off = 'px-2.5 py-1 rounded-md transition-all text-slate-500 hover:text-slate-900';
+  document.getElementById('viewModeIndivBtn').className = state.sync ? off : on;
+  document.getElementById('viewModeSyncBtn').className = state.sync ? on : off;
+}
 function renderColumns() {
   const wrap = document.getElementById('stageColumns');
   const items = filteredProducts();
   renderSearchNotice(items);
   document.getElementById('productCountBadge').innerText = state.view ?`(대상 ${items.length}개 품번${items.length !== state.view.products.length ? ` / 전체 ${state.view.products.length}개` : ''})` : '';
+
+  // 동기화 보기: ⑤ 보관 값으로 줄 세운 품번 목록을 만들고, 모든 컬럼이 같은 줄에 같은 품번을 표시한다.
+  // 재고 0도 포함해야 '적은순'에서 품절 위험 품번이 맨 위에 보인다.
+  const syncOrder = state.sync
+    ? items.filter(p => stageVal(p, 5) != null)
+      .sort((a, b) => state.syncSort === 'asc' ? stageVal(a, 5) - stageVal(b, 5) : stageVal(b, 5) - stageVal(a, 5))
+      .slice(0, state.cols[5].top)
+    : null;
 
   wrap.innerHTML = STAGES.map(stage => {
     const k = stage.k;
@@ -1174,9 +1206,14 @@ function renderColumns() {
     const valid = withVal.filter(x => x.v != null && (k === 7 || x.v > 0));
     const nullCount = k === 7 ? 0 : withVal.filter(x => x.v == null && (x.p.st[k].box > 0 || x.p.st[k].ton > 0)).length;
     const total = valid.reduce((a, x) => a + x.v, 0);
-    valid.sort((a, b) => cfg.sort === 'asc' ? a.v - b.v : b.v - a.v);
-    const shown = valid.slice(0, cfg.top);
-    const max = Math.max(...shown.map(x => x.v), 1e-9);
+    let shown;
+    if (syncOrder) {
+      shown = syncOrder.map(p => ({ p, v: stageVal(p, k) }));
+    } else {
+      valid.sort((a, b) => cfg.sort === 'asc' ? a.v - b.v : b.v - a.v);
+      shown = valid.slice(0, cfg.top);
+    }
+    const max = Math.max(...shown.map(x => x.v || 0), 1e-9);
 
     const sortOpts = k === 7
       ? [['asc', '적은순'], ['desc', '많은순']]
@@ -1187,8 +1224,15 @@ function renderColumns() {
 
     const list = shown.length ? shown.map(({ p, v }) => {
       const sel = p.code === state.selected;
+      // 이 단계에 해당 품번 물량이 없으면 '-' · 단 ⑤ 보관은 재고 0을 명확히 보여준다 (품절)
+      const empty = v == null || (k !== 7 && k !== 5 && v <= 0);
+      const soldOut = k === 5 && v === 0;
       let valueHtml, barColor = stage.color;
-      if (k === 7) {
+      if (empty) {
+        valueHtml = '<span class="text-slate-300">-</span>';
+      } else if (soldOut) {
+        valueHtml = `<span class="text-saseRed">${fmtNum(0)}</span>`;
+      } else if (k === 7) {
         valueHtml = `D-${Math.floor(v).toLocaleString()}`;
         barColor = p.urgent ? 'bg-saseRed' : p.caution ? 'bg-amber-400' : 'bg-emerald-500';
       } else {
@@ -1197,24 +1241,31 @@ function renderColumns() {
       const tag = k === 7 && p.urgent ? '<span class="ml-1 text-[9px] font-bold bg-red-100 text-red-700 px-1 rounded">긴급</span>'
         : k === 7 && p.caution ? '<span class="ml-1 text-[9px] font-bold bg-amber-100 text-amber-800 px-1 rounded">주의</span>'
         : p.registered === false ? '<span class="ml-1 text-[9px] font-bold bg-slate-200 text-slate-600 px-1 rounded">미등록</span>' : '';
-      const pct = Math.max(2, Math.round(v / max * 100));
+      const pct = empty || (v <= 0 && k !== 7) ? 0 : Math.max(2, Math.round(v / max * 100));
+      const barHtml = pct ? `<div class="${barColor} h-1.5 rounded-full" style="width:${pct}%"></div>` : '';
       return `<div role="button" tabindex="0" data-code="${esc(p.code)}" onclick="selectProduct(this.dataset.code)" onkeydown="if(event.key==='Enter')selectProduct(this.dataset.code)" class="stage-item group cursor-pointer w-full text-left rounded-lg px-2 py-1.5 ${sel ? 'bg-red-50 ring-1 ring-saseRed' : 'hover:bg-red-50/50'}">
         <div class="flex items-center justify-between gap-1 text-[11px]">
           <span class="flex items-center gap-1 min-w-0">
-            <span class="font-bold text-slate-900 truncate">${esc(p.raw)}${tag}</span>
+            <span class="font-bold ${empty ? 'text-slate-400' : 'text-slate-900'} truncate">${esc(p.raw)}${tag}</span>
             <button type="button" data-copy="${esc(p.raw)}" onclick="event.stopPropagation(); copyCode(this.dataset.copy)" class="shrink-0 text-slate-300 group-hover:text-slate-500 hover:!text-saseRed" title="품번 복사" data-capture-ignore><i class="fa-regular fa-copy"></i></button>
           </span>
-          <span class="font-extrabold text-slate-800 whitespace-nowrap tabular-nums">${valueHtml}</span>
+          <span class="font-extrabold ${empty ? 'text-slate-300' : 'text-slate-800'} whitespace-nowrap tabular-nums">${valueHtml}</span>
         </div>
         <div class="text-[10px] text-slate-400 truncate">${esc(p.name)}</div>
-        <div class="mt-1 w-full bg-slate-100 rounded-full h-1.5 overflow-hidden"><div class="${barColor} h-1.5 rounded-full" style="width:${pct}%"></div></div>
+        <div class="mt-1 w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">${barHtml}</div>
       </div>`;
     }).join('') : '<div class="text-[11px] text-slate-400 text-center py-6">해당 상품 없음</div>';
 
-    const topSel = `<select onchange="setColOption(${k},'top',this.value)" class="flex-1 min-w-0 py-1 px-1 text-[11px] bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-saseRed">
+    // 동기화 보기에서는 ⑤만 줄 수·정렬을 조작할 수 있고, 나머지 컬럼은 ⑤를 그대로 따라간다
+    const locked = state.sync && k !== 5;
+    const selCls = `flex-1 min-w-0 py-1 px-1 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:border-saseRed ${locked ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-slate-50'}`;
+    const lockTitle = locked ? ' title="⑤ 보관 기준 동기화 보기에서는 ⑤ 설정을 따릅니다"' : '';
+    const topSel = `<select ${locked ? 'disabled' : ''}${lockTitle} onchange="setColOption(${k},'top',this.value)" class="${selCls}">
         ${[10, 20, 30].map(n => `<option value="${n}" ${cfg.top === n ? 'selected' : ''}>상위 ${n}개</option>`).join('')}</select>`;
-    const sortSel = `<select onchange="setColOption(${k},'sort',this.value)" class="flex-1 min-w-0 py-1 px-1 text-[11px] bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-saseRed">
-        ${sortOpts.map(([v, l]) => `<option value="${v}" ${cfg.sort === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+    const isSyncSortSel = state.sync && k === 5;
+    const curSort = isSyncSortSel ? state.syncSort : cfg.sort;
+    const sortSel = `<select ${locked ? 'disabled' : ''}${lockTitle} onchange="${isSyncSortSel ? 'setSyncSort(this.value)' : `setColOption(${k},'sort',this.value)`}" class="${selCls}">
+        ${sortOpts.map(([v, l]) => `<option value="${v}" ${curSort === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
     const numColor = k === 7 ? 'bg-saseOrange' : 'bg-saseRed';
     const colBorder = k === 5 ? 'border-2 border-saseRed bg-red-50/40' : k === 7 ? 'border border-saseOrange bg-amber-50/40' : 'border border-slate-200 bg-slate-50/60';
     return `<div class="stage-col rounded-xl ${colBorder} flex flex-col min-w-0">
@@ -1235,8 +1286,11 @@ function renderColumns() {
 
   if (state.view) {
     const v = state.view;
+    const syncNote = state.sync
+      ? `⑤ 보관 ${state.syncSort === 'asc' ? '적은순' : '많은순'} 기준 상위 ${state.cols[5].top}개 품번을 모든 컬럼이 같은 줄에 표시합니다 (해당 단계 데이터가 없으면 '-'). `
+      : '';
     document.getElementById('stageFootnote').innerText =
-      `①②③ 화물은 주간 기준일(${v.B}) 기준 · ③은 이후 수입 입고분을 품번별로 차감 · ④⑤⑥은 수불기간 ${v.B} ~ ${v.T} · ⑦은 최근 ${v.N}영업일 소진속도 기준 (보유 ${v.bizCover.length}영업일). 상품을 클릭하면 오른쪽에 7단계 수량이 표시되고, 한 번 더 클릭하거나 Esc를 누르면 전체 현황으로 돌아갑니다.`;
+      `${syncNote}①②③ 화물은 주간 기준일(${v.B}) 기준 · ③은 이후 수입 입고분을 품번별로 차감 · ④⑤⑥은 수불기간 ${v.B} ~ ${v.T} · ⑦은 최근 ${v.N}영업일 소진속도 기준 (보유 ${v.bizCover.length}영업일). 상품을 클릭하면 오른쪽에 7단계 수량이 표시되고, 한 번 더 클릭하거나 Esc를 누르면 전체 현황으로 돌아갑니다.`;
   }
 }
 
@@ -1886,6 +1940,7 @@ window.addEventListener('keydown', e => {
 window.onload = async function () {
   document.getElementById('velocityWindow').value = String(state.velocityWindow);
   setGlobalUnit(state.unit);
+  renderViewModeToggle();
   tickClock(); setInterval(tickClock, 1000);
   await loadIndex();
   renderSnapshotSelect();
