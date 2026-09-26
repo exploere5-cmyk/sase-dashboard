@@ -187,7 +187,7 @@
             </div>
             <div class="bg-slate-100 p-0.5 rounded-lg border border-slate-200 flex items-center font-semibold" data-capture-ignore>
               <button type="button" id="denseOffBtn" onclick="setDense(false)" class="px-2.5 py-1 rounded-md transition-all bg-white text-saseRed shadow-sm" title="품번·품명·막대를 모두 표시">보통</button>
-              <button type="button" id="denseOnBtn" onclick="setDense(true)" class="px-2.5 py-1 rounded-md transition-all text-slate-500 hover:text-slate-900" title="한 줄로 줄여 두 배 많이 보기">초춘히</button>
+              <button type="button" id="denseOnBtn" onclick="setDense(true)" class="px-2.5 py-1 rounded-md transition-all text-slate-500 hover:text-slate-900" title="한 줄로 줄여 두 배 많이 보기">춘춘히</button>
             </div>
             <span class="hidden 2xl:flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-saseRed"></span> ①~⑥ 수량 (<span class="currentUnitLabel">톤</span>)</span>
             <span class="hidden 2xl:flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-saseOrange"></span> ⑦ 예상 소진 영업일</span>
@@ -1047,7 +1047,7 @@ const store = {
 const state = {
   unit: store.get('unit', 'TON'),
   cols: store.get('cols', null) || Object.fromEntries(STAGES.map(s => [s.k, { top: 10, sort: s.k === 7 ? 'asc' : 'desc' }])),
-  dense: store.get('dense', false),        // 목록 밀도: true = 한 줄로 초춘히
+  dense: store.get('dense', false),        // 목록 밀도: true = 한 줄로 춘춘히
   sync: store.get('sync', false),          // ⑤ 보관 기준 동기화 보기 여부
   syncSort: store.get('syncSort', 'asc'),  // 동기화 보기 정렬 (기본: 적은순 = 재고 없는 상품부터)
   velocityWindow: store.get('velocityWindow', 20),
@@ -1411,32 +1411,6 @@ function renderSummary() {
   const urgent = withV.filter(p => p.urgent).length;
   const caution = withV.filter(p => p.caution && !p.urgent).length;
 
-  // 소비기한 (LOT No. 가 있는 자료에서만)
-  const T = state.view.T;
-  const daysLeft = d => Math.round((new Date(d + 'T00:00:00') - new Date(T + 'T00:00:00')) / 86400000);
-  let hasExp = false, expiredCodes = 0;
-  items.forEach(p => {
-    if (!p.exp) return;
-    hasExp = true;
-    if (p.exp.some(({ d, box: b }) => b > 0 && daysLeft(d) <= 0)) expiredCodes++;
-  });
-  // 수량은 품번별 박스당 중량으로 환산해 현재 단위로 합산한다
-  const expIn = which => {
-    let out = 0;
-    items.forEach(p => {
-      if (!p.exp) return;
-      p.exp.forEach(({ d, box: b }) => {
-        const left = daysLeft(d);
-        const hit = which === 'expired' ? left <= 0 : (left > 0 && left <= 90);
-        if (!hit) return;
-        if (state.unit === 'TON') { if (p.kg != null) out += b * p.kg / 1000; }
-        else out += b;
-      });
-    });
-    return out;
-  };
-  const expiredU = expIn('expired'), soonU = expIn('soon');
-
   // 창고 TOP5
   const whAgg = {};
   items.forEach(p => Object.entries(p.wh || {}).forEach(([w, b]) => {
@@ -1464,22 +1438,6 @@ function renderSummary() {
         <div><div class="text-[9px] text-amber-700">안전재고 미달</div><b class="text-amber-700 text-sm">${caution}</b></div>
       </div>
     </div>
-
-    ${hasExp ? `<div class="${expiredU > 0 ? 'bg-red-50 border-saseRed/40' : 'bg-slate-50 border-slate-200'} border rounded-lg px-2.5 py-2">
-      <div class="text-[10px] font-bold ${expiredU > 0 ? 'text-red-800' : 'text-slate-700'} mb-1">
-        <i class="fa-solid fa-calendar-check"></i> 소비기한
-      </div>
-      <div class="grid grid-cols-2 gap-1 text-center">
-        <div><div class="text-[9px] ${expiredU > 0 ? 'text-red-700' : 'text-slate-500'}">기한 경과</div>
-          <b class="${expiredU > 0 ? 'text-saseRed' : 'text-slate-400'} text-sm tabular-nums">${fmtNum(expiredU)}</b>
-          <span class="text-[9px] text-slate-400">${u} · ${expiredCodes}품번</span></div>
-        <div><div class="text-[9px] text-slate-500">90일 이내</div>
-          <b class="${soonU > 0 ? 'text-amber-700' : 'text-slate-400'} text-sm tabular-nums">${fmtNum(soonU)}</b>
-          <span class="text-[9px] text-slate-400">${u}</span></div>
-      </div>
-    </div>` : `<div class="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-[10px] text-slate-500">
-      <b>소비기한</b> 정보가 없는 자료입니다. LOT재고현황을 다시 올리면 표시됩니다.
-    </div>`}
 
     <div class="min-w-0">
       <div class="flex items-center justify-between gap-2 mb-1">
