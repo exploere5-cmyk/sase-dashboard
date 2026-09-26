@@ -140,6 +140,7 @@
           <button onclick="printView()" class="px-2.5 py-1.5 hover:bg-slate-50 text-slate-700 font-semibold" title="인쇄"><i class="fa-solid fa-print"></i> 인쇄</button>
           <button onclick="exportImage()" class="px-2.5 py-1.5 hover:bg-slate-50 text-slate-700 font-semibold border-l border-slate-300" title="이미지(PNG) 저장"><i class="fa-regular fa-image"></i> 이미지</button>
           <button onclick="exportPdf()" class="px-2.5 py-1.5 hover:bg-slate-50 text-slate-700 font-semibold border-l border-slate-300" title="PDF 저장"><i class="fa-regular fa-file-pdf"></i> PDF</button>
+          <button onclick="exportExcel()" class="px-2.5 py-1.5 hover:bg-slate-50 text-slate-700 font-semibold border-l border-slate-300" title="품번별 7단계 수치를 엑셀(.xlsx)로 저장"><i class="fa-regular fa-file-excel text-emerald-600"></i> 엑셀</button>
         </div>
         <button onclick="openUploadModal()" class="no-print inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white font-medium rounded-lg shadow-sm">
           <i class="fa-solid fa-file-arrow-up text-emerald-400"></i> 데이터 업로드 <i class="fa-solid fa-lock text-[10px] text-slate-400"></i>
@@ -1623,6 +1624,76 @@ async function exportPdf() {
     pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, w, h);
     pdf.save(captureName('pdf'));
   } catch (e) { toast('PDF 저장에 실패했습니다: ' + esc(e.message)); }
+}
+
+/* ---------- 엑셀 내보내기 ---------- */
+// 검색·원산지 필터는 반영하되 화면의 '상위 N개' 제한은 무시하고 대상 품번 전체를 내려받는다.
+// 값은 문자열이 아닌 숫자로 넣어 엑셀에서 바로 계산·정렬할 수 있게 한다 (데이터 없으면 빈 칸).
+function exportExcel() {
+  if (!state.view) { toast('표시할 데이터가 없습니다.'); return; }
+  try {
+    const v = state.view, snap = state.snap;
+    const num = (x, d) => (x == null ? '' : +x.toFixed(d));
+    const items = [...filteredProducts()].sort((a, b) => {
+      const av = a.st[5].ton != null ? a.st[5].ton : a.st[5].box || 0;
+      const bv = b.st[5].ton != null ? b.st[5].ton : b.st[5].box || 0;
+      return state.sync && state.syncSort === 'asc' ? av - bv : bv - av;
+    });
+    const idle = p => ![1, 2, 3, 4, 5, 6].some(k => (p.st[k].box || 0) > 0 || (p.st[k].ton || 0) > 0);
+
+    const head = ['품번', '품명', '원산지', '품번마스터', '박스당 중량(kg)',
+      '① 해외생산(박스)', '① 해외생산(톤)', '② 선적·항해(박스)', '② 선적·항해(톤)',
+      '③ 통관·검역(박스)', '③ 통관·검역(톤)', '④ 입고(박스)', '④ 입고(톤)',
+      '⑤ 보관(박스)', '⑤ 보관(톤)', '⑥ 출고(박스)', '⑥ 출고(톤)',
+      '일평균 소진(박스)', '안전재고(박스)', '⑦ 예상 소진 영업일', '예상 소진일', '상태',
+      '제외창고 재고(박스)', '단종·미운영'];
+    const rows = items.map(p => {
+      const st = k => [num(p.st[k].box, 1), num(p.st[k].ton, 3)];
+      return [p.raw, p.name, p.origin || '', p.registered === false ? '미등록' : '등록', num(p.kg, 3),
+        ...st(1), ...st(2), ...st(3), ...st(4), ...st(5), ...st(6),
+        num(p.V, 2), num(p.S, 1), p.D == null ? '' : Math.floor(p.D), p.eta || '',
+        p.urgent ? '긴급' : p.caution ? '주의' : '', num(p.exclBox, 1), idle(p) ? 'Y' : ''];
+    });
+    const ws = XLSX.utils.aoa_to_sheet([head, ...rows]);
+    ws['!cols'] = head.map((h, i) => ({ wch: i === 1 ? 34 : i === 0 ? 14 : Math.max(10, h.length + 2) }));
+    ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows.length, c: head.length - 1 } }) };
+
+    // 창고별 보관 재고 (제외창고 제외 · 화면의 '창고별 재고'와 같은 기준)
+    const whHead = ['품번', '품명', '창고', '보관(박스)', '보관(톤)'];
+    const whRows = [];
+    items.forEach(p => Object.entries(p.wh || {}).sort((a, b) => b[1] - a[1])
+      .forEach(([w, box]) => whRows.push([p.raw, p.name, w, num(box, 1), num(p.kg == null ? null : box * p.kg / 1000, 3)])));
+    const wsWh = XLSX.utils.aoa_to_sheet([whHead, ...whRows]);
+    wsWh['!cols'] = [{ wch: 14 }, { wch: 34 }, { wch: 22 }, { wch: 12 }, { wch: 12 }];
+
+    const q = document.getElementById('searchInput').value.trim();
+    const origin = document.getElementById('originFilter');
+    const wsInfo = XLSX.utils.aoa_to_sheet([
+      ['SASE 상품별 통합 현황판 – 품번별 7단계 수치'],
+      [],
+      ['업로드 일시', snap ? fmtDateTime(snap.uploadedAt) : ''],
+      ['주간 기준일(①②③ 화물 기준)', v.B],
+      ['집계 마감일(④⑤⑥ 수불)', v.T],
+      ['소진속도 산정 영업일', `최근 ${v.N}영업일 (보유 ${v.bizCover.length}영업일)`],
+      ['대상 품번 수', items.length],
+      ['검색어', q || '(없음)'],
+      ['원산지 필터', origin && origin.value !== 'ALL' ? origin.value : '전체'],
+      ['내보낸 일시', fmtDateTime(new Date().toISOString())],
+      [],
+      ['참고', '톤 값은 박스당 중량(kg)으로 환산한 값이며, 중량 미등록 품번은 빈 칸입니다.'],
+      ['', '③ 통관·검역은 주간 기준일 이후의 수입 입고분을 품번별로 차감한 값입니다.'],
+      ['', "'단종·미운영' Y 는 ①~⑥ 어느 단계에도 물량이 없는 품번입니다."],
+      ['', '제외창고(샘플·불량 등) 재고는 ⑤ 보관에 넣지 않고 별도 열로 표시합니다.']
+    ]);
+    wsInfo['!cols'] = [{ wch: 28 }, { wch: 70 }];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '품번별 7단계');
+    XLSX.utils.book_append_sheet(wb, wsWh, '창고별 보관');
+    XLSX.utils.book_append_sheet(wb, wsInfo, '기준 정보');
+    XLSX.writeFile(wb, captureName('xlsx'));
+    toast(`<i class="fa-solid fa-check text-emerald-400"></i> 엑셀 ${items.length}개 품번을 저장했습니다`, 2500);
+  } catch (e) { toast('엑셀 저장에 실패했습니다: ' + esc(e.message)); }
 }
 
 /* ---------- 관리자 확인 (화면단 비밀번호: 실수 방지용) ---------- */
