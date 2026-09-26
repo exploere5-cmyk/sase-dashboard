@@ -1190,7 +1190,7 @@ function hasCargoData() {
 function arrivalLine(p) {
   const a = p.arrival || {};
   const u = unitLabel();
-  if (a.next) return { text: `입고 ${fmtMD(a.next)} · ${fmtArrival(a.nextTon, a.nextBox)}${u}`, cls: 'text-blue-600' };
+  if (a.next) return { text: `입항 ${fmtMD(a.next)} · ${fmtArrival(a.nextTon, a.nextBox)}${u}`, cls: 'text-blue-600' };
   const bonded = stageVal(p, 3);
   if (bonded > 0) return { text: `통관·검역 ${fmtNum(bonded)}${u} · 입고일 미확정`, cls: 'text-indigo-600' };
   if (a.unknownN) return { text: `입항 일정 미확정 ${fmtArrival(a.unknownTon, a.unknownBox)}${u}`, cls: 'text-amber-600' };
@@ -1875,7 +1875,7 @@ function renderDeepDive() {
     arrCls = 'text-slate-400';
   }
   let holdVal, holdSub, holdCls;
-  if (!a.next) { holdVal = '-'; holdSub = '다음 입고 일정 없음'; holdCls = 'text-slate-400'; }
+  if (!a.next) { holdVal = '-'; holdSub = '다음 입항 일정 없음'; holdCls = 'text-slate-400'; }
   else if (!(p.V > 0)) { holdVal = '판정 보류'; holdSub = '출고 실적 없음'; holdCls = 'text-slate-400'; }
   else if (a.shortBox > 0) { holdVal = `${fmtBoxIn(p, a.shortBox)}${u} 부족`; holdSub = `도착까지 ${a.bizDays}영업일 · 필요 ${fmtBoxIn(p, a.needBox)}${u}${shortSub}`; holdCls = 'text-saseRed'; }
   else { holdVal = '여유'; holdSub = `도착까지 ${a.bizDays}영업일 · 필요 ${fmtBoxIn(p, a.needBox)}${u}${shortSub}`; holdCls = 'text-emerald-600'; }
@@ -1885,8 +1885,8 @@ function renderDeepDive() {
     ['일평균 소진', p.V == null ? '-' : fmtBoxIn(p, p.V), `${u}/영업일${p.sampleShort ? ` · 표본 ${p.sampleDays}영업일` : ''}`, 'text-slate-800'],
     [`최소 보관수량 (${Core.CONFIG.LEAD_TIME_DAYS}영업일)`, p.S == null ? '-' : fmtBoxIn(p, p.S), u, p.caution ? 'text-amber-600' : 'text-slate-800'],
     ['예상 소진', p.D == null ? '-' : `D-${Math.floor(p.D)}`, p.eta ? `${p.eta} 예상${shortSub}` : '판매 실적 없음', p.urgent ? 'text-saseRed' : 'text-slate-800'],
-    ['다음 입고 예정', arrVal, arrSub, arrCls],
-    ['입고까지 버팀', holdVal, holdSub, holdCls]
+    ['다음 입항 예정(ETA)', arrVal, arrSub, arrCls],
+    ['입항까지 버팀', holdVal, holdSub, holdCls]
   ].map(([label, val, sub, cls]) => `<div class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
       <div class="text-[11px] text-slate-500 truncate">${label}</div>
       <div class="text-lg font-extrabold ${cls} tabular-nums leading-tight">${val}</div>
