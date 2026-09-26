@@ -593,6 +593,13 @@ const Core = (() => {
     while (left > 0) { d = shiftISO(d, 1); if (isBizDay(d)) left--; }
     return d;
   }
+  // from 다음 날부터 to 까지의 영업일 수
+  function bizDaysBetween(from, to) {
+    if (!from || !to || to <= from) return 0;
+    let n = 0, d = from, guard = 0;
+    while (d < to && guard++ < 4000) { d = shiftISO(d, 1); if (isBizDay(d)) n++; }
+    return n;
+  }
   function datesBetween(from, to) {
     const out = [];
     for (let d = from; d <= to; d = shiftISO(d, 1)) out.push(d);
@@ -652,7 +659,9 @@ const Core = (() => {
     const uh = un.findIndex(r => r && str(r[0]) === '품목코드');
     if (uh < 0) throw new Error('2.미통관재고 시트의 헤더(품목코드)를 찾지 못했습니다');
     const ship = {};
+    const cargo = {};          // 품번별 화물 행 (B/L · ETD · ETA · 입고일 · 검역완료일 …)
     const stat = { s1: { n: 0, t: 0 }, s2: { n: 0, t: 0 }, s3: { n: 0, t: 0 }, ex: { n: 0, t: 0 } };
+    let etaN = 0, noEtaN = 0;
     const blank = () => ({ t: 0, b: 0, tu: 0, n: 0 });
     for (let i = uh + 1; i < un.length; i++) {
       const r = un[i] || [];
@@ -680,6 +689,13 @@ const Core = (() => {
         s.s3wh = s.s3wh || {};
         s.s3wh[wh] = round((s.s3wh[wh] || 0) + ton);
       }
+      // 화물 단위 일정: [단계, 톤, 박스, ETD, ETA, 입고일, 검역완료일, 입고창고, B/L, Shipper, Order, Seq]
+      const eta = toDate(r[14]);
+      if (stage !== 'ex') { if (eta) etaN++; else noEtaN++; }
+      (cargo[code] || (cargo[code] = [])).push([
+        stage, round(ton), box, toDate(r[13]) || '', eta || '', toDate(r[15]) || '', toDate(r[16]) || '',
+        CONFIG.WH_SHORT[str(r[17])] || str(r[17]) || '', str(r[8]), str(r[9]), str(r[4]), str(r[6])
+      ]);
     }
     for (const s of Object.values(ship)) for (const k of ['s1', 's2', 's3', 'ex']) {
       s[k].t = round(s[k].t); s[k].b = round(s[k].b); s[k].tu = round(s[k].tu);
@@ -687,9 +703,9 @@ const Core = (() => {
     for (const p of Object.values(products)) { p.g = round(p.g); p.h = round(p.h); p.j = round(p.j); }
 
     return {
-      data: { baseDate, rep: products, ship, outOfScope },
+      data: { baseDate, rep: products, ship, cargo, outOfScope },
       meta: {
-        baseDate, rows: Object.keys(products).length,
+        baseDate, rows: Object.keys(products).length, etaN, noEtaN,
         stages: Object.fromEntries(Object.entries(stat).map(([k, v]) => [k, { n: v.n, t: round(v.t, 1) }]))
       }
     };
@@ -1034,11 +1050,44 @@ const Core = (() => {
       for (const d of allCover) if (inPeriod(d)) s6box += salesOn(d, code);
 
       // 4.7 소진속도 · 안전재고 · 품절예측
+      // 화물 일정 (①②만 = 아직 국내 도착 전. ③은 이미 보세구역 반입, ex 는 수출분)
+      const cargo = (snap.weekly.cargo && snap.weekly.cargo[code]) || [];
+      const etaMap = {};
+      let nextEta = null, unknownTon = 0, unknownBox = 0, unknownN = 0;
+      let lateTon = 0, lateBox = 0, lateN = 0, lateFirst = null;
+      for (const c of cargo) {
+        const [stg, cTon, cBox, , cEta] = c;
+        if (stg === 'ex' || stg === 's3') continue;
+        if (!cEta) { unknownTon += cTon || 0; unknownBox += cBox || 0; unknownN++; continue; }
+        if (cEta < T) {                       // 입항 예정일이 지났는데 아직 반입되지 않은 물량
+          lateTon += cTon || 0; lateBox += cBox || 0; lateN++;
+          if (!lateFirst || cEta < lateFirst) lateFirst = cEta;
+          continue;
+        }
+        const e = etaMap[cEta] || (etaMap[cEta] = { ton: 0, box: 0, n: 0 });
+        e.ton += cTon || 0; e.box += cBox || 0; e.n++;
+        if (!nextEta || cEta < nextEta) nextEta = cEta;
+      }
       const n = bizCover.length;
       const V = n ? bizCover.reduce((a, d) => a + salesOn(d, code), 0) / n : null;
       const S = V != null ? CONFIG.LEAD_TIME_DAYS * V : null;
       let D = null, eta = null;
       if (V > 0) { D = s5box / V; eta = addBizDays(T, Math.ceil(D)); }
+      // 다음 입고 예정까지 현재고로 버티는지 (원본 ETA = 입항 예정일 기준)
+      const arrival = {
+        next: nextEta,
+        nextTon: nextEta ? round(etaMap[nextEta].ton) : 0,
+        nextBox: nextEta ? round(etaMap[nextEta].box) : 0,
+        nextN: nextEta ? etaMap[nextEta].n : 0,
+        unknownTon: round(unknownTon), unknownBox: round(unknownBox), unknownN,
+        lateTon: round(lateTon), lateBox: round(lateBox), lateN, lateFirst,
+        bizDays: nextEta ? bizDaysBetween(T, nextEta) : null,
+        needBox: null, shortBox: null
+      };
+      if (nextEta && V > 0) {
+        arrival.needBox = round(V * arrival.bizDays, 1);
+        arrival.shortBox = round(Math.max(0, arrival.needBox - s5box), 1);
+      }
       const st = {
         1: s1, 2: s2, 3: s3,
         4: { box: s4box, ton: toTon(s4box), est: false },
@@ -1047,7 +1096,7 @@ const Core = (() => {
       };
       const hasPipeline = [1, 2, 3].some(k => (st[k].ton || 0) > 0 || (st[k].box || 0) > 0);
       products.push({
-        code, ...p, st, s3weekly: s3w, recon, wh, exclBox, exp, expUnknown, expExcl,
+        code, ...p, st, s3weekly: s3w, recon, wh, exclBox, exp, expUnknown, expExcl, cargo, arrival,
         V, S, D, eta, sampleDays: n, sampleShort: n < N,
         noSales: V === 0, urgent: D != null && D <= CONFIG.URGENT_DAYS, caution: S != null && V > 0 && s5box < S,
         refill: S != null && V > 0 && s5box < S && hasPipeline,
@@ -1057,7 +1106,7 @@ const Core = (() => {
     return { B, T, N, bizCover, products };
   }
 
-  return { CONFIG, str, normCode, toDate, toNum, parseKg, parseOrigin, isExcludedWh, whTag, isBizDay, addBizDays, detectType, PARSERS, buildSnapshot, compute };
+  return { CONFIG, str, normCode, toDate, toNum, parseKg, parseOrigin, isExcludedWh, whTag, isBizDay, addBizDays, bizDaysBetween, detectType, PARSERS, buildSnapshot, compute };
 })();
 if (typeof module !== 'undefined') module.exports = Core;
 </script>
@@ -1094,6 +1143,7 @@ const state = {
   summaryOpen: store.get('summaryOpen', true),   // 오른쪽 전체 현황 패널 표시 여부
   sync: store.get('sync', false),          // ⑤ 보관 기준 동기화 보기 여부
   syncSort: store.get('syncSort', 'asc'),  // 동기화 보기 정렬 (기본: 적은순 = 재고 없는 상품부터)
+  riskFilter: store.get('riskFilter', 'all'),    // ⑦ 품절예측 상태 필터 (all · urgent · caution)
   velocityWindow: store.get('velocityWindow', 20),
   index: { snapshots: [] },
   snapCache: {},
@@ -1126,6 +1176,23 @@ function fmtNum(v) {
   return state.unit === 'TON'
     ? v.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })
     : Math.round(v).toLocaleString();
+}
+// 화물 수량을 현재 단위로 (주간보고서는 톤과 박스를 함께 갖고 있다)
+function fmtArrival(ton, box) {
+  return state.unit === 'TON' ? fmtNum(ton || 0) : (box ? fmtNum(box) : '-');
+}
+// 이 스냅샷이 화물 일정(ETD/ETA)을 갖고 있는지 — 없으면 주간재고보고서를 다시 올려야 한다
+function hasCargoData() {
+  return !!(state.snap && state.snap.weekly && state.snap.weekly.cargo);
+}
+// 다음 입고 예정 한 줄 요약 { text, cls }
+function arrivalLine(p) {
+  const a = p.arrival || {};
+  const u = unitLabel();
+  if (a.next) return { text: `입고 ${fmtMD(a.next)} · ${fmtArrival(a.nextTon, a.nextBox)}${u}`, cls: 'text-blue-600' };
+  if (a.unknownN) return { text: `입항 일정 미확정 ${fmtArrival(a.unknownTon, a.unknownBox)}${u}`, cls: 'text-amber-600' };
+  if (a.lateN) return { text: `입항 예정일 경과 ${a.lateN}건`, cls: 'text-amber-600' };
+  return { text: '', cls: '' };
 }
 function fmtStage(p, k, withUnit = true) {
   const v = stageVal(p, k);
@@ -1273,6 +1340,11 @@ function setColOption(k, key, val) {
   renderColumns();
 }
 // ⑤ 보관 기준 동기화 보기 — 개별 보기의 컬럼별 정렬과 섞이지 않게 정렬 기준을 따로 기억한다
+function setRiskFilter(val) {
+  state.riskFilter = val;
+  store.set('riskFilter', val);
+  renderColumns();
+}
 function setSyncSort(val) {
   state.syncSort = val;
   store.set('syncSort', val);
@@ -1345,8 +1417,13 @@ function renderColumns() {
     if (syncOrder) {
       shown = syncOrder.map(p => ({ p, v: stageVal(p, k) }));
     } else {
-      valid.sort((a, b) => cfg.sort === 'asc' ? a.v - b.v : b.v - a.v);
-      shown = valid.slice(0, cfg.top);
+      // ⑦ 품절예측은 언제나 소진 빠른순, 상태 필터(긴급·주의)를 따로 적용한다
+      let pool = valid;
+      if (k === 7 && state.riskFilter !== 'all') {
+        pool = valid.filter(x => state.riskFilter === 'urgent' ? x.p.urgent : (x.p.urgent || x.p.caution));
+      }
+      pool = [...pool].sort((a, b) => k === 7 || cfg.sort === 'asc' ? a.v - b.v : b.v - a.v);
+      shown = pool.slice(0, cfg.top);
     }
     // 막대 기준: 동기화 보기는 컬럼 전체 최대값(줄 세운 품번만 보면 아주 작은 값이 가득 찬 막대로 보임)
     const max = syncOrder
@@ -1354,7 +1431,7 @@ function renderColumns() {
       : Math.max(...shown.map(x => x.v || 0), 1e-9);
 
     const sortOpts = k === 7
-      ? [['asc', '적은순'], ['desc', '많은순']]
+      ? [['all', '전체'], ['urgent', '긴급만'], ['caution', '주의 이상']]
       : [['desc', '많은순'], ['asc', '적은순']];
     const colHead = k === 7
       ? `${valid.length}개 · <b class="text-saseRed">긴급 ${valid.filter(x => x.p.urgent).length}</b> · <b class="text-amber-600">주의 ${valid.filter(x => x.p.caution && !x.p.urgent).length}</b>`
@@ -1390,9 +1467,11 @@ function renderColumns() {
           </span>
           <span class="font-extrabold ${empty ? 'text-slate-300' : 'text-slate-800'} whitespace-nowrap tabular-nums">${valueHtml}</span>
         </div>`;
+      const arr = k === 7 && !syncOrder && !state.dense ? arrivalLine(p) : { text: '' };
       const body = state.dense
         ? `<div class="mt-0.5 w-full bg-slate-100 rounded-full h-1 overflow-hidden">${barHtml}</div>`
         : `<div class="text-[10px] text-slate-400 truncate">${esc(p.name)}</div>
+        ${arr.text ? `<div class="text-[10px] font-semibold ${arr.cls} truncate">${arr.text}</div>` : ''}
         <div class="mt-1 w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">${barHtml}</div>`;
       return `<div role="button" tabindex="0" data-code="${esc(p.code)}" onclick="selectProduct(this.dataset.code)" onkeydown="if(event.key==='Enter')selectProduct(this.dataset.code)" title="${esc(p.raw)} · ${esc(p.name)}" class="stage-item group cursor-pointer w-full text-left rounded-lg px-2 ${state.dense ? 'py-1' : 'py-1.5'} ${sel ? 'bg-red-50 ring-1 ring-saseRed' : 'hover:bg-red-50/50'}">
         ${head}${body}
@@ -1406,8 +1485,11 @@ function renderColumns() {
     const topSel = `<select ${locked ? 'disabled' : ''}${lockTitle} onchange="setColOption(${k},'top',this.value)" class="${selCls}">
         ${[10, 20, 30].map(n => `<option value="${n}" ${cfg.top === n ? 'selected' : ''}>상위 ${n}개</option>`).join('')}</select>`;
     const isSyncSortSel = state.sync && k === 5;
-    const curSort = isSyncSortSel ? state.syncSort : cfg.sort;
-    const sortSel = `<select ${locked ? 'disabled' : ''}${lockTitle} onchange="${isSyncSortSel ? 'setSyncSort(this.value)' : `setColOption(${k},'sort',this.value)`}" class="${selCls}">
+    const isRiskSel = k === 7;
+    const curSort = isRiskSel ? state.riskFilter : isSyncSortSel ? state.syncSort : cfg.sort;
+    const onSort = isRiskSel ? 'setRiskFilter(this.value)' : isSyncSortSel ? 'setSyncSort(this.value)' : `setColOption(${k},'sort',this.value)`;
+    const sortTitle = isRiskSel ? ' title="소진 빠른순 고정 · 상태로 걸러 봅니다"' : lockTitle;
+    const sortSel = `<select ${locked ? 'disabled' : ''}${sortTitle} onchange="${onSort}" class="${selCls}">
         ${sortOpts.map(([v, l]) => `<option value="${v}" ${curSort === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
     const numColor = k === 7 ? 'bg-saseOrange' : 'bg-saseRed';
     const colBorder = k === 5 ? 'border-2 border-saseRed bg-red-50/40' : k === 7 ? 'border border-saseOrange bg-amber-50/40' : 'border border-slate-200 bg-slate-50/60';
@@ -1433,7 +1515,7 @@ function renderColumns() {
         `①~⑥ 전 단계 물량이 0인 품번(단종·미운영 추정)은 제외 · 대상 ${syncBase.length}개 품번. `
       : '';
     document.getElementById('stageFootnote').innerText =
-      `${syncNote}①②③ 화물은 주간 기준일(${v.B}) 기준 · ③은 이후 수입 입고분을 품번별로 차감 · ④⑤⑥은 수불기간 ${v.B} ~ ${v.T} · ⑦은 최근 ${v.N}영업일 소진속도 기준 (보유 ${v.bizCover.length}영업일). 상품을 클릭하면 그 상품의 상세(7단계 · 소비기한 · 창고)가 한 장으로 열리고, Esc나 바깥 여백을 누르면 닫힙니다.`;
+      `${syncNote}⑦은 소진 빠른순 고정이며 드롭다운으로 긴급·주의만 걸러 볼 수 있습니다. ①②③ 화물은 주간 기준일(${v.B}) 기준 · ③은 이후 수입 입고분을 품번별로 차감 · ④⑤⑥은 수불기간 ${v.B} ~ ${v.T} · ⑦은 최근 ${v.N}영업일 소진속도 기준 (보유 ${v.bizCover.length}영업일). 상품을 클릭하면 그 상품의 상세(7단계 · 소비기한 · 창고)가 한 장으로 열리고, Esc나 바깥 여백을 누르면 닫힙니다.`;
   }
 }
 
@@ -1470,6 +1552,15 @@ function renderSummary() {
   const urgent = withV.filter(p => p.urgent).length;
   const caution = withV.filter(p => p.caution && !p.urgent).length;
 
+  // 입항 일정 (원본 ETA 기준)
+  let etaUnknownN = 0, lateN = 0;
+  items.forEach(pr => {
+    const a = pr.arrival;
+    if (!a) return;
+    if (!a.next && a.unknownN) etaUnknownN++;
+    lateN += a.lateN || 0;
+  });
+
   // 창고 TOP5
   const whAgg = {};
   items.forEach(p => Object.entries(p.wh || {}).forEach(([w, b]) => {
@@ -1496,6 +1587,13 @@ function renderSummary() {
         <div><div class="text-[9px] text-amber-700">긴급 D-${Core.CONFIG.URGENT_DAYS}</div><b class="text-saseRed text-sm">${urgent}</b></div>
         <div><div class="text-[9px] text-amber-700">안전재고 미달</div><b class="text-amber-700 text-sm">${caution}</b></div>
       </div>
+      ${hasCargoData() ? `<div class="mt-1.5 pt-1.5 border-t border-amber-200/70 grid grid-cols-2 gap-1 text-center">
+        <div><div class="text-[9px] text-amber-700">입항 일정 미확정</div><b class="text-slate-900 text-sm">${etaUnknownN}</b><span class="text-[9px] text-slate-500"> 품번</span></div>
+        <div><div class="text-[9px] text-amber-700">입항 예정일 경과</div><b class="${lateN ? 'text-saseRed' : 'text-slate-400'} text-sm">${lateN}</b><span class="text-[9px] text-slate-500"> 건</span></div>
+      </div>` : `<div class="mt-1.5 pt-1.5 border-t border-amber-200/70 text-[9px] text-slate-500 leading-tight">
+        입항 일정(ETA)은 주간재고보고서를 다시 올리면 표시됩니다.
+      </div>`}
+      <div class="mt-1 text-[9px] text-slate-500">소진속도 표본 ${state.view.bizCover.length}영업일${state.view.bizCover.length < state.view.N ? ' · 예상 소진일수는 참고값' : ''}</div>
     </div>
 
     <div class="min-w-0">
@@ -1597,6 +1695,7 @@ function riskInfo(p) {
   const d = `D-${Math.floor(p.D)}`;
   if (p.urgent) return { cls: 'bg-red-100 text-red-800', text: `품절 긴급 (${d})` };
   if (p.caution) return { cls: 'bg-amber-100 text-amber-800', text: `안전재고 미달 (${d})` };
+  if (p.sampleShort) return { cls: 'bg-slate-100 text-slate-600', text: `참고 (${d} · 표본 ${p.sampleDays}영업일)` };
   return { cls: 'bg-emerald-100 text-emerald-800', text: `재고 안정 (${d})` };
 }
 function renderDetail() {
@@ -1747,13 +1846,39 @@ function renderDeepDive() {
   const T = state.view.T, u = unitLabel();
   const pipeline = [1, 2, 3, 4].reduce((a, k) => a + (p.st[k].box || 0), 0);
   const coverAll = p.V > 0 ? (p.st[5].box + pipeline) / p.V : null;
+  const a = p.arrival || {};
+  const shortSub = p.sampleShort ? ` · 참고값(표본 ${p.sampleDays}영업일)` : '';
+  let arrVal, arrSub, arrCls;
+  if (a.next) {
+    arrVal = fmtMD(a.next);
+    arrSub = `${fmtArrival(a.nextTon, a.nextBox)}${u} · 원본 ETA(입항 예정)${a.bizDays != null ? ` · ${a.bizDays}영업일 뒤` : ''}`;
+    arrCls = 'text-blue-600';
+  } else if (a.unknownN) {
+    arrVal = '미확정';
+    arrSub = `입항 일정 미확정 ${fmtArrival(a.unknownTon, a.unknownBox)}${u} (${a.unknownN}건)`;
+    arrCls = 'text-amber-600';
+  } else if (!hasCargoData()) {
+    arrVal = '-';
+    arrSub = '주간재고보고서를 다시 올리면 표시됩니다';
+    arrCls = 'text-slate-400';
+  } else {
+    arrVal = '-';
+    arrSub = a.lateN ? `입항 예정일 경과 ${a.lateN}건` : '예정 물량 없음';
+    arrCls = 'text-slate-400';
+  }
+  let holdVal, holdSub, holdCls;
+  if (!a.next) { holdVal = '-'; holdSub = '다음 입고 일정 없음'; holdCls = 'text-slate-400'; }
+  else if (!(p.V > 0)) { holdVal = '판정 보류'; holdSub = '출고 실적 없음'; holdCls = 'text-slate-400'; }
+  else if (a.shortBox > 0) { holdVal = `${fmtBoxIn(p, a.shortBox)}${u} 부족`; holdSub = `도착까지 ${a.bizDays}영업일 · 필요 ${fmtBoxIn(p, a.needBox)}${u}${shortSub}`; holdCls = 'text-saseRed'; }
+  else { holdVal = '여유'; holdSub = `도착까지 ${a.bizDays}영업일 · 필요 ${fmtBoxIn(p, a.needBox)}${u}${shortSub}`; holdCls = 'text-emerald-600'; }
+
   const tiles = [
     ['현재고 ⑤', fmtBoxIn(p, p.st[5].box), u, 'text-saseRed'],
-    ['일평균 소진', p.V == null ? '-' : fmtBoxIn(p, p.V), `${u}/영업일`, 'text-slate-800'],
+    ['일평균 소진', p.V == null ? '-' : fmtBoxIn(p, p.V), `${u}/영업일${p.sampleShort ? ` · 표본 ${p.sampleDays}영업일` : ''}`, 'text-slate-800'],
     [`최소 보관수량 (${Core.CONFIG.LEAD_TIME_DAYS}영업일)`, p.S == null ? '-' : fmtBoxIn(p, p.S), u, p.caution ? 'text-amber-600' : 'text-slate-800'],
-    ['예상 소진', p.D == null ? '-' : `D-${Math.floor(p.D)}`, p.eta ? `${p.eta} 예상` : '판매 실적 없음', p.urgent ? 'text-saseRed' : 'text-slate-800'],
-    ['입고 예정 ①~④', fmtBoxIn(p, pipeline), u, 'text-blue-600'],
-    ['총 확보 영업일', coverAll == null ? '-' : Math.floor(coverAll).toLocaleString(), '현재고+입고예정 기준', 'text-slate-800']
+    ['예상 소진', p.D == null ? '-' : `D-${Math.floor(p.D)}`, p.eta ? `${p.eta} 예상${shortSub}` : '판매 실적 없음', p.urgent ? 'text-saseRed' : 'text-slate-800'],
+    ['다음 입고 예정', arrVal, arrSub, arrCls],
+    ['입고까지 버팀', holdVal, holdSub, holdCls]
   ].map(([label, val, sub, cls]) => `<div class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
       <div class="text-[11px] text-slate-500 truncate">${label}</div>
       <div class="text-lg font-extrabold ${cls} tabular-nums leading-tight">${val}</div>
